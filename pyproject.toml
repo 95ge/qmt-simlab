@@ -29,6 +29,9 @@ dev = [
 qmt-simlab = "qmt_simulator.server:main"
 qmt-simlab-gateway = "qmt_simulator.gateway.gateway_main:main"
 
+[tool.setuptools]
+license-files = ["LICENSE"]
+
 [tool.setuptools.packages.find]
 include = ["qmt_simulator*", "qmt_sim_sdk*"]
 

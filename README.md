@@ -285,4 +285,6 @@ qmt-simlab/
 
 ## License
 
-MIT License。发布到 GitHub 前，请根据实际版权主体更新 `LICENSE` 和项目元数据。
+本项目采用 [MIT License](LICENSE) 开源协议。
+
+Copyright (c) 2026 QMT SimLab Contributors。
