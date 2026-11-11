@@ -1,5 +1,12 @@
 # qmt-simlab
 
+[![GitHub Stars](https://img.shields.io/github/stars/95ge/qmt-simlab?style=flat-square&logo=github)](https://github.com/95ge/qmt-simlab)
+[![GitHub Forks](https://img.shields.io/github/forks/95ge/qmt-simlab?style=flat-square&logo=github)](https://github.com/95ge/qmt-simlab/forks)
+[![Open Issues](https://img.shields.io/github/issues/95ge/qmt-simlab?style=flat-square)](https://github.com/95ge/qmt-simlab/issues)
+[![Open Pull Requests](https://img.shields.io/github/issues-pr/95ge/qmt-simlab?style=flat-square)](https://github.com/95ge/qmt-simlab/pulls)
+[![Last Commit](https://img.shields.io/github/last-commit/95ge/qmt-simlab/main?style=flat-square)](https://github.com/95ge/qmt-simlab/commits/main/)
+[![MIT License](https://img.shields.io/github/license/95ge/qmt-simlab?style=flat-square)](LICENSE)
+
 `qmt-simlab` 是一个可以独立运行的 QMT 风格交易仿真平台，面向量化策略开发、接口联调、回测前的交易流程验证和教学演示。项目包含仿真服务、浏览器管理页面、Python SDK，以及可选的 XM/QMT 网关桥接层，不依赖原有业务后端即可运行。
 
 项目的 Python SDK 提供两层接口：
@@ -24,7 +31,7 @@
 ### 安装
 
 ```bash
-git clone https://github.com/your-org/qmt-simlab.git
+git clone https://github.com/95ge/qmt-simlab.git
 cd qmt-simlab
 
 python -m venv .venv
