@@ -10,7 +10,8 @@ from typing import Callable, Dict, Optional
 from sqlalchemy.orm import sessionmaker
 
 from .account_manager import AccountManager
-from .models import Order, Trade
+from .market_data import MarketQuote, QuoteStore
+from .models import Account, Position, Order, Trade
 from .scenario import ScenarioConfig, CommissionConfig
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,8 @@ REJECT_REASONS = ["风控拒绝", "账户余额不足", "标的停牌", "超出�
 
 class OrderEngine:
     def __init__(self, manager: AccountManager, session_factory: sessionmaker,
-                 scenario: ScenarioConfig, commission: CommissionConfig = None):
+                 scenario: ScenarioConfig, commission: CommissionConfig = None,
+                 quote_store: Optional[QuoteStore] = None):
         self.manager = manager
         self._session_factory = session_factory
         self.scenario = scenario
@@ -28,6 +30,13 @@ class OrderEngine:
         self._cancel_events: Dict[str, threading.Event] = {}
         self._completion_events: Dict[str, threading.Event] = {}
         self._lock = threading.Lock()
+        self.quote_store = quote_store
+        self._quote_pending: Dict[str, dict] = {}
+        self._quote_lock = threading.RLock()
+        self._quote_depth: Dict[tuple, tuple] = {}
+        if self.quote_store is not None:
+            self.quote_store.subscribe(self._on_market_quote)
+            self.quote_store.subscribe_evictions(self._on_quote_evicted)
 
         # 回调属性（由外部设置）
         self.on_order_callback: Optional[Callable] = None
@@ -42,14 +51,27 @@ class OrderEngine:
     def submit_order_sync(self, order_data: dict) -> dict:
         fund_id = order_data.get("fund_account_id") or order_data.get("account") or order_data.get("account_id", "")
         order_id = order_data.get("order_id") or str(uuid.uuid4())
-        symbol = order_data.get("symbol", "")
+        symbol = order_data.get("symbol", "").strip().upper()
         direction = order_data.get("direction", "buy")
         price = float(order_data.get("price") or 10.0)
         quantity = int(order_data.get("quantity", 0))
         price_type = order_data.get("price_type", "limit")
+        cfg = self.manager.get_account_config(fund_id)
+        mode = cfg.get("execution_mode", cfg.get("fill_mode", "random"))
+        mode = "random" if mode == "auto" else mode
 
         if price_type == "market":
-            price = 10.0
+            price = 0.0 if mode == "quote" else 10.0
+
+        if mode == "quote":
+            import math
+            if (not symbol or direction not in ("buy", "sell") or quantity <= 0
+                    or price_type not in ("limit", "market")
+                    or (price_type == "limit" and (not math.isfinite(float(order_data.get("price") or 0))
+                                                  or float(order_data.get("price") or 0) <= 0))):
+                return {"success": False, "message": "Invalid quote order", "external_order_id": ""}
+            if not self.manager.get_account(fund_id):
+                return {"success": False, "message": "Account does not exist", "external_order_id": ""}
 
         # 风控校验
         reject_reason = self._risk_check(fund_id, direction, price, quantity)
@@ -81,6 +103,15 @@ class OrderEngine:
         finally:
             db.close()
 
+        if mode == "quote":
+            with self._quote_lock:
+                self._quote_pending[order_id] = {"symbol": symbol, "config": dict(cfg)}
+                self._fire_order(order_id, external_id, symbol, "submitted", "等待行情撮合", 0, 0.0,
+                                 direction=direction, price=price, quantity=quantity, fund_account_id=fund_id)
+                self._match_quote_order(order_id)
+            return {"success": True, "internal_order_id": order_id, "external_order_id": external_id,
+                    "error_code": 0, "message": "订单已提交"}
+
         # 立即回调 submitted
         self._fire_order(order_id, external_id, symbol, "submitted", "已报", 0, 0.0,
                          direction=direction, price=price, quantity=quantity, fund_account_id=fund_id)
@@ -92,7 +123,7 @@ class OrderEngine:
 
         threading.Thread(
             target=self._fill_loop,
-            args=(order_id, external_id, fund_id, symbol, direction, price, quantity, cancel_event),
+            args=(order_id, external_id, fund_id, symbol, direction, price, quantity, cancel_event, cfg),
             daemon=True,
         ).start()
 
@@ -153,6 +184,10 @@ class OrderEngine:
 
     def cancel_order_sync(self, order_data: dict) -> dict:
         ext_id = order_data.get("external_order_id", "")
+        with self._quote_lock:
+            if ext_id in self._quote_pending:
+                self._finish_quote_order(ext_id, "canceled", "已撤单")
+                return {"success": True, "message": "已撤单"}
         with self._lock:
             event = self._cancel_events.get(ext_id)
         if event:
@@ -172,21 +207,31 @@ class OrderEngine:
         acc = self.manager.get_account(fund_account_id)
         if not acc:
             return []
-        return acc.get("positions", [])
+        positions = acc.get("positions", [])
+        if self.manager.get_execution_mode(fund_account_id) == "quote" and self.quote_store:
+            max_age = acc.get("scenario_config", {}).get("quote_max_age_ms", 3000)
+            for position in positions:
+                quote = self.quote_store.get(position["symbol"])
+                position["last_price"] = quote.last_price if quote else position["cost_price"]
+                position["quote_stale"] = quote is None or int(time.time() * 1000) - quote.ts > max_age
+                position["market_value"] = position["quantity"] * position["last_price"]
+                position["profit_loss"] = position["market_value"] - position["quantity"] * position["cost_price"]
+        return positions
 
     def query_balance_sync(self, fund_account_id: str) -> dict:
         acc = self.manager.get_account(fund_account_id)
         if not acc:
             return {"total_asset": 0.0, "cash": 0.0, "market_value": 0.0}
         cash = acc["cash"]
-        market_value = sum(p["quantity"] * p["cost_price"] for p in acc.get("positions", []))
+        positions = self.query_positions_sync(fund_account_id)
+        market_value = sum(p.get("market_value", p["quantity"] * p["cost_price"]) for p in positions)
         return {
             "total_asset": cash + market_value,
             "cash": cash,
             "available_cash": cash,
             "market_value": market_value,
             "frozen_cash": 0.0,
-            "profit_loss": 0.0,
+            "profit_loss": sum(p.get("profit_loss", 0) for p in positions),
         }
 
     def query_order_sync(self, external_order_id: str, account_id: str, fund_account_id: str):
@@ -357,6 +402,148 @@ class OrderEngine:
 
     # ── 内部逻辑 ──────────────────────────────────────────────
 
+    def _on_quote_evicted(self, removed):
+        expired = {id(quote) for quote in removed}
+        with self._quote_lock:
+            for key, (quote, _) in list(self._quote_depth.items()):
+                if id(quote) in expired:
+                    del self._quote_depth[key]
+
+    def _on_market_quote(self, quote: MarketQuote):
+        with self._quote_lock:
+            for order_id, pending in list(self._quote_pending.items()):
+                if pending["symbol"] == quote.symbol:
+                    self._match_quote_order(order_id)
+
+    def get_market_price(self, symbol, account_id):
+        cfg = self.manager.get_account_config(account_id)
+        max_age = None if cfg.get("quote_fallback") == "last" else cfg.get("quote_max_age_ms", 3000)
+        quote = self.quote_store.get(symbol, max_age) if self.quote_store else None
+        if quote is None or quote.trading_status != "open":
+            raise ValueError("行情缺失、过期或市场未开放；请注入可用行情后启动算法")
+        return quote.last_price
+
+    def _finish_quote_order(self, order_id, status, message):
+        db = self._session_factory()
+        try:
+            order = db.query(Order).filter_by(id=order_id).first()
+            if not order:
+                self._quote_pending.pop(order_id, None)
+                return
+            order.status = status
+            order.reject_reason = message if status == "rejected" else None
+            db.commit()
+            self._quote_pending.pop(order_id, None)
+            self._fire_order(order.id, order.id, order.symbol, status, message,
+                             order.filled_qty, order.filled_amount / order.filled_qty if order.filled_qty else 0,
+                             direction=order.direction, price=order.price, quantity=order.quantity,
+                             fund_account_id=order.account_id)
+        finally:
+            db.close()
+        self._signal_completion(order_id)
+
+    def _match_quote_order(self, order_id):
+        """Called under _quote_lock; quote fills commit as one transaction.
+
+        Each account is an independent simulation. Orders within an account
+        share the remaining size of a snapshot, in submission order.
+        """
+        pending = self._quote_pending.get(order_id)
+        if pending is None:
+            return
+        cfg = pending["config"]
+        quote = self.quote_store.get(pending["symbol"]) if self.quote_store else None
+        max_age = cfg.get("quote_max_age_ms", 3000)
+        stale = quote is not None and int(time.time() * 1000) - quote.ts > max_age
+        fallback = cfg.get("quote_fallback", "pending")
+        if quote is None or (stale and fallback != "last"):
+            if fallback == "reject":
+                self._finish_quote_order(order_id, "rejected", "行情缺失或已过期")
+            return
+        if quote.trading_status != "open":
+            return
+
+        failure = None
+        event = None
+        with self.manager._lock:
+            db = self._session_factory()
+            try:
+                order = db.query(Order).filter_by(id=order_id).first()
+                if not order or order.status not in ("submitted", "partial_filled"):
+                    self._quote_pending.pop(order_id, None)
+                    return
+                price = quote.executable_price(order.direction)
+                if order.price_type == "limit":
+                    if order.direction == "buy" and price > order.price:
+                        return
+                    if order.direction == "sell" and price < order.price:
+                        return
+                qty = order.quantity - order.filled_qty
+                depth_key = (order.account_id, order.symbol, order.direction)
+                snapshot, consumed = self._quote_depth.get(depth_key, (None, 0))
+                if snapshot is not quote:
+                    consumed = 0
+                size = quote.available_qty(order.direction)
+                if cfg.get("use_depth", True) and size is not None:
+                    qty = min(qty, max(0, size - consumed))
+                if qty <= 0:
+                    return
+                comm_cfg = {**self.commission.to_dict(), **cfg.get("commission", {})}
+                commission = CommissionConfig(**comm_cfg).calculate(order.direction, price * qty)
+                account = db.query(Account).filter_by(id=order.account_id).first()
+                position = db.query(Position).filter_by(account_id=order.account_id, symbol=order.symbol).first()
+                if account is None:
+                    failure = "账号不存在"
+                elif order.direction == "buy" and account.cash < price * qty + commission:
+                    failure = "可用资金不足（含手续费）"
+                elif order.direction == "sell" and (position is None or position.available_qty < qty):
+                    failure = "可卖持仓不足"
+                if failure is None:
+                    amount = price * qty
+                    if order.direction == "buy":
+                        account.cash -= amount + commission
+                        if position is None:
+                            position = Position(account_id=order.account_id, symbol=order.symbol,
+                                                quantity=0, available_qty=0, cost_price=0)
+                            db.add(position)
+                        position.cost_price = (position.cost_price * position.quantity + amount) / (position.quantity + qty)
+                        position.quantity += qty
+                        position.available_qty += qty
+                    else:
+                        account.cash += amount - commission
+                        position.quantity -= qty
+                        position.available_qty -= qty
+                        if position.quantity == 0:
+                            db.delete(position)
+                    order.filled_qty += qty
+                    order.filled_amount += amount
+                    order.status = "filled" if order.filled_qty == order.quantity else "partial_filled"
+                    trade_id, trade_time = str(uuid.uuid4()), int(time.time() * 1000)
+                    db.add(Trade(id=trade_id, order_id=order.id, account_id=order.account_id,
+                                 symbol=order.symbol, direction=order.direction, price=price,
+                                 quantity=qty, amount=amount, commission=commission, trade_time=trade_time))
+                    db.commit()
+                    self._quote_depth[depth_key] = (quote, consumed + qty)
+                    event = (trade_id, trade_time, order.account_id, order.symbol, order.direction,
+                             order.price, order.quantity, order.filled_qty, order.filled_amount,
+                             order.status, qty, price, amount, commission)
+            except Exception:
+                db.rollback()
+                raise
+            finally:
+                db.close()
+        if failure:
+            self._finish_quote_order(order_id, "rejected", failure)
+        elif event:
+            tid, ts, account, symbol, direction, limit, total, filled, amount_total, status, qty, price, amount, commission = event
+            if status == "filled":
+                self._quote_pending.pop(order_id, None)
+            self._fire_trade(tid, order_id, order_id, account, symbol, direction, price, qty, amount, commission, ts)
+            self._fire_order(order_id, order_id, symbol, status, status, filled, amount_total / filled,
+                             direction=direction, price=limit, quantity=total, fund_account_id=account)
+            if status == "filled":
+                self._signal_completion(order_id)
+
     def _risk_check(self, fund_id: str, direction: str, price: float, quantity: int) -> Optional[str]:
         if direction == "buy":
             needed = price * quantity
@@ -365,11 +552,11 @@ class OrderEngine:
                 return f"可用资金不足（需要 {needed:.2f}，可用 {cash:.2f}）"
         return None
 
-    def _fill_loop(self, order_id, external_id, fund_id, symbol, direction, price, quantity, cancel_event):
+    def _fill_loop(self, order_id, external_id, fund_id, symbol, direction, price, quantity, cancel_event, config=None):
         # 加载账号专属配置（fill_mode 也存储在此，fallback 到 auto）
-        _cfg = self.manager.get_account_config(fund_id)
+        _cfg = config if config is not None else self.manager.get_account_config(fund_id)
 
-        if _cfg.get('fill_mode', 'auto') == 'manual':
+        if _cfg.get('execution_mode', _cfg.get('fill_mode', 'auto')) == 'manual':
             self._handle_manual_fill(order_id, external_id, fund_id, symbol, direction, price, quantity, cancel_event)
             return
 

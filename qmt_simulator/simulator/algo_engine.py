@@ -289,8 +289,10 @@ class SimAlgoEngine:
                 return False
         return task.status != AlgoStatus.CANCELLED.value
 
-    def _get_market_price(self, symbol: str) -> float:
+    def _get_market_price(self, symbol: str, account_id: str = "") -> float:
         """从后端获取实时行情价格，失败返回 0.0。"""
+        if self._account_manager.get_execution_mode(account_id) == "quote":
+            return self._order_engine.get_market_price(symbol, account_id)
         try:
             url = f"{self.backend_url}/api/v1/realtime-quote/single/{symbol}"
             req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -301,8 +303,8 @@ class SimAlgoEngine:
         except Exception:
             return 0.0
 
-    def _get_slippage_price(self, symbol: str, direction: str, slippage: float = 0.005) -> float:
-        price = self._get_market_price(symbol)
+    def _get_slippage_price(self, symbol: str, direction: str, slippage: float = 0.005, task=None) -> float:
+        price = self._get_market_price(symbol, task.fund_account_id if task else "")
         if price <= 0:
             return 0.0
         return round(price * (1 + slippage if direction == "buy" else 1 - slippage), 2)
@@ -315,7 +317,7 @@ class SimAlgoEngine:
             task.start_time = datetime.now()
             self._report_progress(task, "开始执行市价算法")
 
-            price = self._get_slippage_price(task.symbol, task.direction, 0.005)
+            price = self._get_slippage_price(task.symbol, task.direction, 0.005, task)
             price_type = "limit" if price > 0 else "market"
 
             filled = self._submit_and_wait(task, task.total_quantity, price, price_type, 15)
@@ -377,7 +379,7 @@ class SimAlgoEngine:
                 if current_qty <= 0:
                     break
 
-                price = self._get_slippage_price(task.symbol, task.direction, 0.005)
+                price = self._get_slippage_price(task.symbol, task.direction, 0.005, task)
                 if price_limit > 0:
                     if task.direction == "buy" and price > price_limit:
                         logger.warning(f"[Algo] TWAP 跳过切片 {i+1}：价格 {price} > 限价 {price_limit}")
@@ -441,7 +443,7 @@ class SimAlgoEngine:
                 if use_limit and fixed_price > 0:
                     price, price_type = fixed_price, "limit"
                 else:
-                    price = self._get_slippage_price(task.symbol, task.direction, 0.005)
+                    price = self._get_slippage_price(task.symbol, task.direction, 0.005, task)
                     price_type = "limit" if price > 0 else "market"
 
                 task.estimated_remaining = int((remaining / display_qty) * interval)
@@ -494,7 +496,7 @@ class SimAlgoEngine:
                 if slice_qty <= 0:
                     continue
 
-                price = self._get_slippage_price(task.symbol, task.direction, 0.005)
+                price = self._get_slippage_price(task.symbol, task.direction, 0.005, task)
                 price_type = "limit" if price > 0 else "market"
                 task.estimated_remaining = int((time_slices - i - 1) * slice_interval)
 
@@ -553,7 +555,7 @@ class SimAlgoEngine:
                 target_qty = min(target_qty, remaining)
 
                 if target_qty > 0:
-                    price = self._get_slippage_price(task.symbol, task.direction, 0.003)
+                    price = self._get_slippage_price(task.symbol, task.direction, 0.003, task)
                     if price_limit > 0:
                         if task.direction == "buy" and price > price_limit:
                             time.sleep(check_interval)
@@ -585,7 +587,7 @@ class SimAlgoEngine:
 
             limit_up_price = task.params.get("price", 0.0)
             if limit_up_price <= 0:
-                price = self._get_market_price(task.symbol)
+                price = self._get_market_price(task.symbol, task.fund_account_id)
                 limit_up_price = round(price * 1.10, 2) if price > 0 else 0.0
 
             if limit_up_price <= 0:
@@ -627,7 +629,7 @@ class SimAlgoEngine:
                 if remaining <= 0:
                     break
 
-                price = self._get_slippage_price(task.symbol, task.direction, slippage)
+                price = self._get_slippage_price(task.symbol, task.direction, slippage, task)
                 price_type = "limit" if price > 0 else "market"
 
                 self._report_progress(task, f"快速成交 第{attempt+1}次尝试, 剩余={remaining}")
@@ -679,7 +681,7 @@ class SimAlgoEngine:
                 slice_qty = max(100, slice_qty)
 
                 price = self._get_slippage_price(task.symbol, task.direction,
-                                                  random.uniform(0.001, 0.005))
+                                                  random.uniform(0.001, 0.005), task)
                 if price_limit > 0:
                     if task.direction == "buy" and price > price_limit:
                         time.sleep(random.uniform(3, 8))

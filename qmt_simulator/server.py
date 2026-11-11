@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ def create_app() -> Any:
     from .simulator.database import init_db
     from .simulator.account_manager import AccountManager
     from .simulator.order_engine import OrderEngine
+    from .simulator.market_data import QuoteStore
     from .simulator.algo_engine import SimAlgoEngine
     from .simulator.scenario import scenario
     from .web.api import app, init_api
@@ -39,16 +41,29 @@ def create_app() -> Any:
     )
     session_factory = sessionmaker(bind=db_engine)
     account_manager = AccountManager(session_factory)
+    quote_store = QuoteStore(retention_ms=settings.quote_retention_ms,
+                             max_symbols=settings.quote_max_symbols)
     order_engine = OrderEngine(
         manager=account_manager,
         session_factory=session_factory,
         scenario=scenario,
+        quote_store=quote_store,
     )
     algo_engine = SimAlgoEngine(
         order_engine=order_engine,
         account_manager=account_manager,
         backend_url=settings.backend_url,
     )
+
+    @asynccontextmanager
+    async def lifespan(application):
+        quote_store.start_cleanup()
+        try:
+            yield
+        finally:
+            quote_store.stop_cleanup()
+
+    app.router.lifespan_context = lifespan
 
     scenario_path = db_path.parent / "scenario.json"
     init_api(

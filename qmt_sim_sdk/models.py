@@ -23,6 +23,10 @@ class Position(_Model):
     quantity: int = 0
     available_qty: int = 0
     cost_price: float = 0.0
+    last_price: Optional[float] = None
+    market_value: Optional[float] = None
+    profit_loss: float = 0.0
+    quote_stale: bool = False
 
 
 @dataclass

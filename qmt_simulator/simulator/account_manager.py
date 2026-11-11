@@ -8,6 +8,10 @@ from sqlalchemy.orm import sessionmaker
 from .models import Account, Position
 
 
+EXECUTION_MODES = {"random", "manual", "quote", "auto"}
+QUOTE_FALLBACKS = {"pending", "reject", "last"}
+
+
 class AccountManager:
     def __init__(self, session_factory: sessionmaker):
         self._session_factory = session_factory
@@ -190,6 +194,20 @@ class AccountManager:
 
     def set_account_config(self, account_id: str, config: dict) -> bool:
         """保存账号场景配置"""
+        mode = config.get("execution_mode")
+        if "execution_mode" in config and mode not in EXECUTION_MODES:
+            raise ValueError("execution_mode must be random, manual, or quote")
+        fallback = config.get("quote_fallback")
+        if "quote_fallback" in config and fallback not in QUOTE_FALLBACKS:
+            raise ValueError("quote_fallback must be pending, reject, or last")
+        if "quote_max_age_ms" in config:
+            age = config["quote_max_age_ms"]
+            if type(age) is not int or age < 0:
+                raise ValueError("quote_max_age_ms must be a nonnegative integer")
+        if "use_depth" in config and type(config["use_depth"]) is not bool:
+            raise ValueError("use_depth must be a boolean")
+        if "fill_mode" in config and config["fill_mode"] not in ("auto", "manual"):
+            raise ValueError("Legacy fill_mode must be auto or manual; use execution_mode for quote/random")
         with self._lock:
             db = self._session_factory()
             try:
@@ -201,6 +219,20 @@ class AccountManager:
                 return True
             finally:
                 db.close()
+
+    def get_execution_mode(self, account_id: str) -> str:
+        """Return the normalized account execution mode.
+
+        Older configurations used ``fill_mode=manual|auto``.  Keep those
+        values working while exposing the clearer three-mode vocabulary.
+        """
+        cfg = self.get_account_config(account_id)
+        mode = cfg.get("execution_mode")
+        if mode == "auto":
+            return "random"
+        if mode in {"random", "manual", "quote"}:
+            return mode
+        return "manual" if cfg.get("fill_mode") == "manual" else "random"
 
     # ── 内部工具 ─────────────────────────────────────────────
 

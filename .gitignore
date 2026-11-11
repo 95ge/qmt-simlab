@@ -18,4 +18,5 @@ qmt_simulator/gateway/cache/
 # Local tooling
 .idea/
 .vscode/
+.playwright-cli/
 

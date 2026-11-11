@@ -145,4 +145,8 @@ def get_default_config_dict() -> dict:
     """返回全局默认配置的字典（作为账号未设置时的 fallback）"""
     d = scenario.to_dict()
     d["commission"] = commission.to_dict()
+    d["execution_mode"] = "random"
+    d["quote_max_age_ms"] = 3000
+    d["quote_fallback"] = "pending"
+    d["use_depth"] = True
     return d

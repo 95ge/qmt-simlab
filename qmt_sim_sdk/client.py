@@ -187,6 +187,60 @@ class SimulationClient:
     def get_account_config(self, account_id: str) -> dict:
         return self._request("GET", f"/api/accounts/{account_id}/config")
 
+    def set_execution_mode(self, account_id: str, mode: str, *,
+                           quote_max_age_ms: Optional[int] = None,
+                           quote_fallback: Optional[str] = None,
+                           use_depth: Optional[bool] = None) -> dict:
+        """Configure new orders without replacing other account settings."""
+        payload = {"execution_mode": mode}
+        for key, value in (("quote_max_age_ms", quote_max_age_ms),
+                           ("quote_fallback", quote_fallback), ("use_depth", use_depth)):
+            if value is not None:
+                payload[key] = value
+        return self._request("PUT", f"/api/accounts/{account_id}/execution-mode", json=payload)
+
+    def publish_quote(self, symbol: str, last_price: float, *, ts: Optional[int] = None,
+                      bid_price: Optional[float] = None, ask_price: Optional[float] = None,
+                      bid_qty: Optional[int] = None, ask_qty: Optional[int] = None,
+                      last_qty: Optional[int] = None, cum_volume: Optional[int] = None,
+                      trading_status: str = "open", seq: Optional[int] = None,
+                      source: str = "") -> dict:
+        """Publish a shared snapshot. ts is milliseconds; omitted ts uses server time.
+
+        Reuse the original ts/seq when retrying a feed event to avoid duplicate
+        liquidity. Quantities are shares, never lots.
+        """
+        payload = dict(symbol=symbol, last_price=last_price, ts=ts,
+                       bid_price=bid_price, ask_price=ask_price, bid_qty=bid_qty,
+                       ask_qty=ask_qty, last_qty=last_qty, cum_volume=cum_volume,
+                       trading_status=trading_status, seq=seq, source=source)
+        return self._request("POST", "/api/market-data/quote",
+                             json={k: v for k, v in payload.items() if v is not None})
+
+    def publish_quotes(self, quotes: Iterable[dict]) -> dict:
+        """Publish 1–1000 snapshots; validate the entire batch before applying it."""
+        return self._request("POST", "/api/market-data/quotes", json=list(quotes))
+
+    def get_quote(self, symbol: str, *, max_age_ms: int = 3000) -> Optional[dict]:
+        try:
+            return self._request("GET", f"/api/market-data/quote/{symbol}", params={"max_age_ms": max_age_ms})
+        except SimulationAPIError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+
+    def list_quotes(self, *, max_age_ms: int = 3000) -> List[dict]:
+        """Latest snapshots with source age, receipt time and stale flags."""
+        return self._request("GET", "/api/market-data/quotes", params={"max_age_ms": max_age_ms})
+
+    def market_data_status(self, *, max_age_ms: int = 3000) -> dict:
+        """Process-local receipt counters, feed freshness and cache policy.
+
+        max_age_ms is a monitoring threshold; it does not change account
+        execution settings. Recent receipt does not imply a fresh source tick.
+        """
+        return self._request("GET", "/api/market-data/status", params={"max_age_ms": max_age_ms})
+
     def update_account_config(self, account_id: str, config: dict) -> dict:
         return self._request("PUT", f"/api/accounts/{account_id}/config", json=config)
 

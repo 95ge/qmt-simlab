@@ -447,7 +447,7 @@ class XtQuantTrader:
                 can_use_volume=position.available_qty,
                 open_price=position.cost_price,
                 avg_price=position.cost_price,
-                market_value=position.quantity * position.cost_price,
+                market_value=position.market_value if position.market_value is not None else position.quantity * position.cost_price,
             )
             for position in positions
         ]

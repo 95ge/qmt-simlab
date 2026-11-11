@@ -22,6 +22,8 @@ class Settings:
     reconnect_interval: int = 5
     # 行情/策略算法可选的外部服务地址
     backend_url: str = os.environ.get("BACKEND_URL", "http://localhost:19600")
+    quote_retention_ms: int = int(os.environ.get("QUOTE_RETENTION_MS", "3600000"))
+    quote_max_symbols: int = int(os.environ.get("QUOTE_MAX_SYMBOLS", "10000"))
 
 
 settings = Settings()

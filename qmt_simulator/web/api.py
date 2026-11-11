@@ -5,18 +5,19 @@ import threading
 import time
 from collections import deque
 from pathlib import Path
-from typing import Optional, List
-from fastapi import FastAPI, HTTPException, Body
+from typing import Optional, List, Literal
+from fastapi import FastAPI, HTTPException, Body, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from qmt_simulator.simulator.scenario import scenario as _scenario, commission as _commission, get_default_config_dict
 from qmt_simulator.simulator.account_manager import AccountManager
 from qmt_simulator.simulator.order_engine import OrderEngine
+from qmt_simulator.simulator.market_data import MarketQuote
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="XM 仿真执行器管理", version="2.0.0")
+app = FastAPI(title="XM 仿真执行器管理", version="0.3.0")
 
 # 这些依赖在 main.py / server_main.py 启动时注入
 _account_manager: Optional[AccountManager] = None
@@ -194,6 +195,86 @@ class ManualFillDecisionRequest(BaseModel):
     fill_qty: Optional[int] = None
     fill_price: Optional[float] = None
     reason: Optional[str] = None
+
+
+class ExecutionModeRequest(BaseModel):
+    execution_mode: Literal["quote", "manual", "random", "auto"]
+    quote_max_age_ms: Optional[int] = Field(default=None, ge=0)
+    quote_fallback: Optional[Literal["pending", "reject", "last"]] = None
+    use_depth: Optional[bool] = None
+
+
+def _quote_store():
+    if not _order_engine or _order_engine.quote_store is None:
+        raise HTTPException(503, "行情服务未就绪")
+    return _order_engine.quote_store
+
+
+@app.post("/api/market-data/quote")
+def publish_quote(payload: dict = Body(...)):
+    try:
+        quote = MarketQuote.from_dict(payload)
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise HTTPException(422, str(exc))
+    latest, accepted = _quote_store().publish(quote)
+    return {"accepted": accepted, "quote": latest.to_dict()}
+
+
+@app.post("/api/market-data/quotes")
+def publish_quotes(payload: List[dict] = Body(...)):
+    if not 1 <= len(payload) <= 1000:
+        raise HTTPException(422, "每批应包含 1 到 1000 条行情")
+    try:
+        # Validate the whole batch before changing the store or matching orders.
+        quotes = [MarketQuote.from_dict(item) for item in payload]
+    except (ValueError, TypeError, OverflowError) as exc:
+        raise HTTPException(422, str(exc))
+    latest, accepted = _quote_store().publish_many(quotes)
+    return {"accepted": accepted, "ignored": len(quotes) - accepted,
+            "quotes": [q.to_dict() for q in latest]}
+
+
+@app.get("/api/market-data/quotes")
+def list_quotes(max_age_ms: int = Query(default=3000, ge=0)):
+    return _quote_store().snapshots(max_age_ms)
+
+
+@app.get("/api/market-data/status")
+def get_market_data_status(max_age_ms: int = Query(default=3000, ge=0)):
+    return _quote_store().status(max_age_ms)
+
+
+@app.get("/api/market-data/quote/{symbol}")
+def get_quote(symbol: str, max_age_ms: int = Query(default=3000, ge=0)):
+    quote = next(iter(_quote_store().snapshots(max_age_ms, symbol.strip().upper())), None)
+    if quote is None:
+        raise HTTPException(404, "尚未收到该证券行情")
+    return quote
+
+
+@app.get("/api/market-data/price/{symbol}")
+def get_execution_price(symbol: str, account_id: str):
+    if not _order_engine:
+        raise HTTPException(503, "服务未就绪")
+    if _account_manager.get_execution_mode(account_id) != "quote":
+        return {"execution_mode": _account_manager.get_execution_mode(account_id), "price": None}
+    try:
+        return {"execution_mode": "quote", "price": _order_engine.get_market_price(symbol, account_id)}
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
+@app.put("/api/accounts/{account_id}/execution-mode")
+def set_execution_mode(account_id: str, req: ExecutionModeRequest):
+    if not _account_manager:
+        raise HTTPException(503, "服务未就绪")
+    cfg = _account_manager.get_account_config(account_id)
+    cfg.update(req.model_dump(exclude_none=True) if hasattr(req, "model_dump") else req.dict(exclude_none=True))
+    cfg["execution_mode"] = "random" if req.execution_mode == "auto" else req.execution_mode
+    cfg["fill_mode"] = "manual" if cfg["execution_mode"] == "manual" else "auto"
+    if not _account_manager.set_account_config(account_id, cfg):
+        raise HTTPException(404, "账号不存在")
+    return {**get_default_config_dict(), **cfg}
 
 
 # ── 系统状态 ─────────────────────────────────────────────────
@@ -470,16 +551,20 @@ def get_account_config(account_id: str):
     if not _account_manager:
         raise HTTPException(503, "服务未就绪")
     cfg = _account_manager.get_account_config(account_id)
-    if not cfg:
-        cfg = get_default_config_dict()
-    return cfg
+    if not _account_manager.get_account(account_id):
+        raise HTTPException(404, "账号不存在")
+    return {**get_default_config_dict(), **cfg,
+            "execution_mode": _account_manager.get_execution_mode(account_id)}
 
 
 @app.put("/api/accounts/{account_id}/config")
 def update_account_config(account_id: str, config: dict = Body(...)):
     if not _account_manager:
         raise HTTPException(503, "服务未就绪")
-    ok = _account_manager.set_account_config(account_id, config)
+    try:
+        ok = _account_manager.set_account_config(account_id, config)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc))
     if not ok:
         raise HTTPException(404, "账号不存在")
     return config

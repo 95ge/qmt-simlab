@@ -100,11 +100,9 @@ def main():
             try:
                 accounts = sim_executor.list_accounts()
                 for acc in accounts:
-                    market_value = sum(
-                        p.get('cost_price', 0) * p.get('quantity', 0)
-                        for p in acc.get('positions', [])
-                    )
-                    cash = acc.get('cash', 0.0)
+                    balance = sim_executor.query_balance_sync(acc['id'])
+                    market_value = balance.get('market_value', 0)
+                    cash = balance.get('cash', acc.get('cash', 0.0))
                     gateway_client.report_balance({
                         "fund_account_id": acc['id'],
                         "total_asset": round(cash + market_value, 4),

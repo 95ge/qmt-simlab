@@ -37,6 +37,8 @@
 
   /* 主体三栏 */
   .main { display: grid; grid-template-columns: 280px 260px 1fr; height: calc(100vh - 49px); }
+  .main.quote-monitor-open { grid-template-columns: minmax(0, 1fr); }
+  .main.quote-monitor-open > .panel:not(:last-child) { display: none; }
   .panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
   .panel:last-child { border-right: none; }
   .panel-header {
@@ -215,7 +217,7 @@
     font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
     transition: background 0.15s, color 0.15s;
   }
-  .mode-btn:first-child { border-right: 1px solid var(--border); }
+  .mode-btn:not(:last-child) { border-right: 1px solid var(--border); }
   .mode-btn.active { background: var(--accent-dim); color: var(--accent); }
   .mode-btn.active.manual { background: #2d1a0a; color: var(--yellow); }
 
@@ -237,15 +239,45 @@
   .fill-action-reject:hover { background: var(--red); color: #fff; }
   .fill-action-cancel { background: var(--surface); color: var(--text-dim); border-color: var(--border); }
   .fill-action-cancel:hover { border-color: var(--text-dim); color: var(--text); }
+  .usage-dialog { margin: auto; width: min(850px, 92vw); max-height: 86vh; overflow: auto;
+    background: var(--surface); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 24px; font-size: 13px; line-height: 1.8; }
+  .usage-dialog::backdrop { background: #000a; }
+  .usage-dialog p, .usage-dialog table, .usage-dialog pre { margin: 14px 0; }
+  .usage-dialog pre { padding: 14px; overflow: auto; background: var(--bg); white-space: pre-wrap; }
+  .usage-dialog h2 { font-size: 18px; color: var(--accent); }
+  .mode-hint { color: var(--text-dim); font-size: 11px; line-height: 1.7; margin: 8px 0; }
+  .mode-tag { color: var(--yellow); font-size: 10px; margin-left: 6px; }
+  #configStatus { min-height: 18px; color: var(--accent); font-size: 11px; }
+  .delay-row select { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 4px; max-width: 145px; font-family: var(--font-mono); font-size: 11px; color-scheme: dark; }
+  .quote-summary { padding: 14px; border-bottom: 1px solid var(--border); line-height: 1.8; }
+  .quote-metrics { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 6px 0; color: var(--text-dim); }
+  .quote-metrics strong { color: var(--text); }
+  .quote-toolbar { flex-wrap: wrap; gap: 8px; }
+  .quote-toolbar input[type=text] { width: 190px; margin: 0; }
+  .quote-fresh { color: var(--green); }
+  .quote-stale { color: var(--yellow); }
+  .quote-table-wrap { overflow: auto; min-height: 180px; max-height: 48vh; }
+  .quote-table { min-width: 1050px; white-space: nowrap; }
+  .quote-source { display: block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--text-dim); margin-top: 3px; }
+  .quote-guide { padding: 12px 14px; font-size: 12px; line-height: 1.8; border-top: 1px solid var(--border); }
+  .quote-guide summary { cursor: pointer; color: var(--accent); }
+  .quote-guide pre { margin-top: 8px; padding: 12px; background: var(--surface); white-space: pre-wrap; overflow-wrap: anywhere; }
+  #quoteMonitorError { color: var(--red); }
+  #quotePageInfo { color: var(--text-dim); }
+  .btn:disabled { opacity: .45; cursor: default; }
 </style>
 </head>
 <body>
 
 <!-- 顶栏 -->
 <div class="topbar">
+  <button id="openQuoteMonitor" class="btn btn-primary btn-sm" onclick="switchTab('quotes')">行情监控</button>
+  <button class="btn btn-primary btn-sm" onclick="document.getElementById('usageDialog').showModal()">使用说明 / SDK 行情</button>
   <span class="logo">XM 仿真执行器</span>
   <span class="exec-id" id="execId">executor-id: —</span>
-  <span class="status-badge offline" id="statusBadge">● 未连接</span>
+  <span class="status-badge offline" id="statusBadge" title="网关连接状态；行情推送状态请查看行情监控">● 网关未连接</span>
 </div>
 
 <!-- 主体 -->
@@ -295,11 +327,25 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
         <div class="detail-label" style="margin:0">成交模式</div>
         <div class="mode-toggle">
-          <button id="btn-mode-auto" class="mode-btn active" onclick="setAccountFillMode('auto')">自动</button>
+          <button id="btn-mode-random" class="mode-btn active" onclick="setAccountFillMode('random')">随机</button>
+          <button id="btn-mode-quote" class="mode-btn" onclick="setAccountFillMode('quote')">行情</button>
           <button id="btn-mode-manual" class="mode-btn" onclick="setAccountFillMode('manual')">手动</button>
         </div>
       </div>
+      <p id="executionHint" class="mode-hint"></p>
+      <div id="configStatus" role="status" aria-live="polite"></div>
+      <div id="quoteSettings" hidden>
+        <div class="delay-row"><label for="quoteMaxAge">行情有效期(ms)</label><input id="quoteMaxAge" type="number" min="0" step="100" value="3000"></div>
+        <div class="delay-row"><label for="quoteFallback">缺失 / 过期</label><select id="quoteFallback">
+          <option value="pending">继续等待</option><option value="reject">撮合检查时拒单</option>
+          <option value="last">允许过期快照</option></select></div>
+        <label class="mode-hint"><input id="quoteUseDepth" type="checkbox" checked> 按买一 / 卖一数量分批成交</label>
+        <p class="mode-hint">行情为全部账号共享；数量单位是股。同一账号内共享每笔快照的可用数量，不同账号独立模拟。没有盘口价时按最新价近似撮合，没有盘口量时不限制成交量。</p>
+        <button class="btn btn-primary" onclick="saveAccountConfig()" style="width:100%">保存行情设置</button>
+        <p id="quoteStatus" class="mode-hint">尚未收到行情</p>
+      </div>
       <hr class="section-divider" style="margin-top:0">
+      <div id="randomSettings">
       <div class="detail-label" style="margin-bottom:10px">成交概率</div>
 
       <div class="scenario-row">
@@ -329,6 +375,7 @@
       <div class="delay-row"><label>批次数 min</label><input type="number" id="dly_bmin" value="2" min="1"></div>
       <div class="delay-row"><label>批次数 max</label><input type="number" id="dly_bmax" value="4" min="1"></div>
       <button class="btn btn-primary" onclick="saveDelay()" style="width:100%;margin-top:4px">应用延迟</button>
+      </div>
 
       <hr class="section-divider">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
@@ -398,9 +445,66 @@
         <button id="tab-trades" onclick="switchTab('trades')">成交</button>
         <button id="tab-positions" onclick="switchTab('positions')">持仓</button>
         <button id="tab-algos" onclick="switchTab('algos')">算法任务</button>
+        <button id="tab-quotes" onclick="switchTab('quotes')">行情监控</button>
         <button id="tab-pending" onclick="switchTab('pending')">待成交<span id="pending-badge" class="pending-count" style="display:none">0</span></button>
       </div>
       <button class="btn btn-sm" style="margin-right:12px;background:var(--border);color:var(--text-dim);border-color:var(--border)" onclick="refreshActive()">刷新</button>
+    </div>
+
+    <div class="tab-content" id="pane-quotes">
+      <div class="quote-summary">
+        <strong id="quoteFeedState" role="status">正在读取行情状态…</strong>
+        <div class="mode-hint">全局行情，无需选择账号。推送接收状态与行情时间是否新鲜分别显示；点击“委托”等标签可返回账号控制。</div>
+        <div class="quote-metrics">
+          <span>缓存 <strong id="qmSymbols">—</strong> 个</span>
+          <span>新鲜 <strong id="qmFresh">—</strong></span>
+          <span>过期 <strong id="qmStale">—</strong></span>
+        </div>
+        <div id="quoteReceiptCounts" class="mode-hint">本次服务启动后的计数：—</div>
+        <div id="quoteLastReceived" class="mode-hint">最近接收时间：—</div>
+        <div id="quoteCachePolicy" class="mode-hint">行情仅保存在内存，每个证券一条最新快照。</div>
+        <div id="quoteCleanupCounts" class="mode-hint"></div>
+        <div id="quoteMonitorUpdated" class="mode-hint"></div>
+        <div id="quoteMonitorError" role="alert"></div>
+      </div>
+      <div class="filter-bar quote-toolbar">
+        <label for="quoteSearch">搜索</label><input type="text" id="quoteSearch" placeholder="证券代码 / 来源" oninput="quotePage=0; renderQuoteMonitor()">
+        <label for="quoteFreshFilter">行情</label><select id="quoteFreshFilter" onchange="quotePage=0; renderQuoteMonitor()">
+          <option value="all">全部</option><option value="fresh">新鲜</option><option value="stale">过期</option>
+        </select>
+        <label for="quoteMonitorMaxAge">新鲜阈值(ms)</label><input id="quoteMonitorMaxAge" type="number" min="0" step="100" value="3000" onchange="quotePage=0; loadQuoteMonitor()">
+        <label><input id="quoteAutoRefresh" type="checkbox" checked> 每 2 秒刷新</label>
+        <button class="btn btn-primary btn-sm" onclick="loadQuoteMonitor()">刷新行情</button>
+      </div>
+      <div class="quote-table-wrap">
+        <table class="data-table quote-table"><thead><tr>
+          <th>代码 / 来源</th><th>最新价</th><th>买一 / 股</th><th>卖一 / 股</th>
+          <th>行情时间</th><th>接收时间</th><th>行情年龄 / 状态</th><th>交易状态</th><th>详情</th>
+        </tr></thead><tbody id="quotes-tbody"><tr><td colspan="9" class="empty-hint">正在加载行情…</td></tr></tbody></table>
+      </div>
+      <div class="load-more-bar" style="gap:12px">
+        <button id="quotePreviousPage" onclick="quotePage--; renderQuoteMonitor()" disabled>上一页</button>
+        <span id="quotePageInfo">0 条</span>
+        <button id="quoteNextPage" onclick="quotePage++; renderQuoteMonitor()" disabled>下一页</button>
+      </div>
+      <details id="quoteDetails" class="quote-guide"><summary id="quoteDetailTitle">原始行情数据（选择表格中的“查看”）</summary>
+        <pre id="quoteDetailData">尚未选择证券。</pre>
+      </details>
+      <details class="quote-guide" open><summary>通过代码查询推送状态与数据</summary>
+        <pre>from qmt_sim_sdk import SimulationClient
+
+client = SimulationClient("http://127.0.0.1:19720")
+print(client.market_data_status())       # 推送计数、最近接收时间、清理策略
+print(client.list_quotes())              # 所有最新行情，含 stale / received_at
+print(client.get_quote("000001.SZ"))     # 尚未收到或已清理时返回 None</pre>
+        <p>也可调用 GET /api/market-data/status、/api/market-data/quotes、/api/market-data/quote/{symbol}。新鲜阈值仅用于监控，不修改账号的撮合设置。</p>
+      </details>
+      <details class="quote-guide"><summary>行情存储与自动清理</summary>
+        <p>行情不写入 SQLite。内存按证券代码保存最新快照，新行情覆盖旧值；没有逐笔历史表。SQLite 中的账号、订单和成交记录不会因行情清理而被删除。</p>
+        <p>默认 1 小时没有接受到更新的证券会被自动清理，每 60 秒检查一次，读写缓存时也会检查；最多保存 10,000 个证券，超出时淘汰最久未更新的证券。重复或乱序推送不延长缓存保留时间。</p>
+        <p>启动前可通过环境变量 QUOTE_RETENTION_MS 和 QUOTE_MAX_SYMBOLS 调整。缓存保留时间与账号的行情有效期不同：过期行情在清理前仍可查看，使用“允许过期快照”的账号也只能使用尚未被清理的快照。</p>
+        <p>推送计数、行情及去重状态都只在本次进程内有效，重启后重置；清理后的证券再次推送将被视为新快照。“最近收到推送”不代表已连接到某个数据源，也不保证行情新鲜或订单成交。</p>
+      </details>
     </div>
 
     <!-- 委托 tab -->
@@ -613,6 +717,45 @@
   </div>
 </div>
 
+<dialog id="usageDialog" class="usage-dialog" aria-labelledby="usageTitle">
+  <button class="btn btn-primary btn-sm" style="float:right" onclick="document.getElementById('usageDialog').close()">关闭</button>
+  <h2 id="usageTitle">用 SDK 驱动模拟交易</h2>
+  <p>先在左侧新建并选择账号，再选择成交模式。模式与行情设置只影响新订单，已提交订单继续按提交时的配置处理。</p>
+  <table><thead><tr><th>账号模式</th><th>订单如何成交</th></tr></thead><tbody>
+    <tr><td>随机 / random</td><td>按成交概率和延迟模拟成交，无需行情。</td></tr>
+    <tr><td>手工 / manual</td><td>到“待成交”页决定成交价、数量、拒单或撤单。</td></tr>
+    <tr><td>行情 / quote</td><td>由注入的行情撮合。买单参考卖一、卖单参考买一，限价单必须满足委托价格。</td></tr>
+  </tbody></table>
+  <p>在项目目录执行 <code>pip install -e .</code> 更新 SDK。下面示例为独立演示程序，会创建一个演示账号并提交一笔模拟买单；请修改账号 ID 避免重复创建。</p>
+  <pre id="sdkQuoteExample">from qmt_sim_sdk import SimulationClient
+
+client = SimulationClient("http://127.0.0.1:19720")
+client.create_account("QUOTE_DEMO", "行情演示", initial_cash=100000)
+client.set_execution_mode("QUOTE_DEMO", "quote", quote_max_age_ms=3000)
+
+# 先挂单，再在行情程序的回调中持续推送
+client.submit_order("000001.SZ", "buy", 100, "QUOTE_DEMO", price=10.30)
+result = client.publish_quote(
+    symbol="000001.SZ", last_price=10.23,
+    bid_price=10.22, ask_price=10.23,
+    bid_qty=12000, ask_qty=8000,
+)
+print(result["accepted"])
+print(client.get_balance("QUOTE_DEMO").to_dict())
+
+# 批量行情：client.publish_quotes([行情字典, ...])
+# 查询快照：client.get_quote("000001.SZ")</pre>
+  <button id="copyQuoteExample" class="btn btn-primary btn-sm" onclick="copyQuoteExample()">复制示例</button>
+  <p><strong>最少字段：</strong><code>symbol</code> 和 <code>last_price</code>。真实数据源建议带 <code>ts</code>（行情产生时间，Unix 毫秒）及买卖一价量；省略 ts 时使用服务器接收时间。价格单位为元、数量单位为股。</p>
+  <p><code>bid_price / ask_price</code> 是买一 / 卖一价；<code>bid_qty / ask_qty</code> 是对应数量，0 表示没有可成交量。缺少盘口价时以最新价近似成交，缺少盘口量时不限制数量，不模拟真实排队。<code>last_qty / cum_volume</code> 暂仅保存，不驱动 POV/VWAP 成交量。</p>
+  <p>每次推送是完整快照，未提供的可选字段不会沿用旧值。重试同一行情时保留原 ts/seq；较旧时间、重复时间且没有更大 seq、同日回退的 seq 会被忽略。一个证券使用一个数据源；seq 按 UTC 日期换日后可重置。</p>
+  <p>默认行情有效期 3000 ms，缺失或过期时继续挂单。可改为在提交 / 行情更新的撮合检查时拒单，或允许使用过期快照（仍需有历史快照）。<code>trading_status</code> 支持 open、closed、halted；后两者暂停撮合。<code>wait=True</code> 超时会撤单。</p>
+  <p>同一快照的盘口量在同一账号内按订单提交顺序分配，全部使用后等待新快照；不同账号各自独立模拟。行情模式按实际成交金额和手续费复核资金与可卖持仓。当前无挂单冻结、T+1 和交易所排队模型；成交持仓可立即卖出。</p>
+  <p>顶部“行情监控”可查看最近推送、买卖一价量、完整数据及 SDK 查询示例。行情仅保存在内存，每个证券一条最新快照；默认 1 小时未更新自动清理，最多保留 10,000 个证券，不会删除 SQLite 中的订单或成交记录。</p>
+  <p>行情账号持仓使用最新价估值，行情缺失时使用成本价，过期快照会标记。服务重启后需重新推送；本版重启后挂单不会自动恢复撮合，请在停服前撤单。</p>
+  <p>行情源无需填写账号。随机与手工账号不会被行情推送触发成交。<a href="/docs" target="_blank" rel="noopener">打开 API 文档</a>查看 REST 格式：POST /api/market-data/quote、POST /api/market-data/quotes（每批 1–1000 条）。</p>
+</dialog>
+
 <script>
 const BASE = '';
 const PAGE_SIZE = 50;
@@ -676,6 +819,10 @@ async function init() {
   document.getElementById('noAccHint').style.display = '';
   document.getElementById('scenarioBody').style.display = 'none';
   setInterval(loadStatus, 5000);
+  setInterval(() => {
+    if (activeTab === 'quotes' && document.getElementById('quoteAutoRefresh').checked) loadQuoteMonitor();
+  }, 2000);
+  setInterval(() => { if (selectedExecutionMode === 'quote') loadQuoteStatus(); }, 3000);
   // 持仓、算法任务、待成交 仍用定时刷新
   setInterval(() => {
     if (!selectedAccountId) return;
@@ -693,7 +840,8 @@ async function init() {
 
 function switchTab(tab) {
   activeTab = tab;
-  ['orders', 'trades', 'positions', 'algos', 'pending'].forEach(t => {
+  document.querySelector('.main').classList.toggle('quote-monitor-open', tab === 'quotes');
+  ['orders', 'trades', 'positions', 'algos', 'pending', 'quotes'].forEach(t => {
     document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
     document.getElementById(`pane-${t}`).classList.toggle('active', t === tab);
   });
@@ -701,6 +849,7 @@ function switchTab(tab) {
 }
 
 function refreshActive() {
+  if (activeTab === 'quotes') { loadQuoteMonitor(); return; }
   if (activeTab === 'pending') { loadPendingFills(); return; }
   if (!selectedAccountId) return;
   if (activeTab === 'orders') resetAndLoad('orders');
@@ -735,7 +884,7 @@ async function loadStatus() {
       badge.textContent = '● 已连接中台';
       badge.className = 'status-badge';
     } else {
-      badge.textContent = '● 未连接';
+      badge.textContent = '● 网关未连接';
       badge.className = 'status-badge offline';
     }
   } catch(e) {}
@@ -751,7 +900,7 @@ async function loadAccounts() {
     if (!allAccounts.length) { el.innerHTML = '<div class="empty-hint">暂无账号，点击右上角新建</div>'; return; }
     el.innerHTML = allAccounts.map(a => `
       <div class="account-item ${a.id === selectedAccountId ? 'active' : ''}" onclick="selectAccount('${a.id}')">
-        <div class="acc-id">${a.id}</div>
+        <div class="acc-id">${a.id}<span class="mode-tag">${({quote:'行情', manual:'手工', random:'随机', auto:'随机'})[a.scenario_config?.execution_mode || a.scenario_config?.fill_mode || 'random'] || '随机'}</span></div>
         <div class="acc-name">${a.name}</div>
         <div class="acc-cash">¥ ${fmtNum(a.cash)}</div>
       </div>`).join('');
@@ -886,7 +1035,11 @@ async function loadAccountConfig(id) {
     updateCommLabels();
     document.getElementById('commFields').style.opacity = (comm.enabled ?? true) ? '1' : '0.45';
     // 成交模式
-    applyFillModeUI(cfg.fill_mode || 'auto');
+    document.getElementById('quoteMaxAge').value = cfg.quote_max_age_ms ?? 3000;
+    document.getElementById('quoteFallback').value = cfg.quote_fallback || 'pending';
+    document.getElementById('quoteUseDepth').checked = cfg.use_depth ?? true;
+    applyFillModeUI(cfg.execution_mode || cfg.fill_mode || 'random');
+    document.getElementById('configStatus').textContent = '';
     // 显示/隐藏提示
     document.getElementById('scenarioAccLabel').textContent = id;
     document.getElementById('noAccHint').style.display = 'none';
@@ -896,7 +1049,11 @@ async function loadAccountConfig(id) {
 
 function buildConfigPayload() {
   return {
-    fill_mode: document.getElementById('btn-mode-manual').classList.contains('active') ? 'manual' : 'auto',
+    execution_mode: selectedExecutionMode,
+    fill_mode: selectedExecutionMode === 'manual' ? 'manual' : 'auto',
+    quote_max_age_ms: Number(document.getElementById('quoteMaxAge').value),
+    quote_fallback: document.getElementById('quoteFallback').value,
+    use_depth: document.getElementById('quoteUseDepth').checked,
     filled_prob: sliderValues.filled / 100,
     partial_filled_prob: sliderValues.partial_filled / 100,
     rejected_prob: sliderValues.rejected / 100,
@@ -918,12 +1075,23 @@ function buildConfigPayload() {
 
 async function saveAccountConfig() {
   if (!selectedAccountId) return;
+  const status = document.getElementById('configStatus');
+  const accountId = selectedAccountId;
+  status.textContent = '正在保存…';
+  try {
   const r = await fetch(`${BASE}/api/accounts/${selectedAccountId}/config`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(buildConfigPayload()),
   });
-  if (!r.ok) { const e = await r.json(); alert(e.detail || '保存失败'); }
+  if (!r.ok) { const e = await r.json(); throw new Error(e.detail || '保存失败'); }
+  if (selectedAccountId === accountId) status.textContent = '已保存，仅对新订单生效';
+  await loadAccounts();
+  return true;
+  } catch (e) {
+    if (selectedAccountId === accountId) status.textContent = `保存失败：${e.message}`;
+    return false;
+  }
 }
 
 async function saveScenario() {
@@ -1059,14 +1227,14 @@ async function loadPositions() {
       return;
     }
     tbody.innerHTML = positions.map(p => {
-      const marketVal = (p.cost_price || 0) * (p.quantity || 0);
+      const marketVal = p.market_value ?? ((p.cost_price || 0) * (p.quantity || 0));
       const avail = p.available_qty !== undefined ? p.available_qty : p.quantity || 0;
       return `<tr>
         <td style="color:var(--accent)">${p.symbol}</td>
         <td>${p.quantity || 0}</td>
         <td>${avail}</td>
         <td>${fmtPrice(p.cost_price)}</td>
-        <td style="color:var(--yellow)">${fmtNum(marketVal)}</td>
+        <td style="color:var(--yellow)">${fmtNum(marketVal)}${p.quote_stale ? '<span class="mode-tag">行情过期 / 缺失</span>' : ''}</td>
         <td style="white-space:nowrap">
           <button class="fill-action-btn fill-action-reject" style="margin-right:4px"
             onclick="openTradeModal('${p.symbol}','sell',${avail},${p.cost_price || 0})">平仓</button>
@@ -1143,20 +1311,162 @@ function algoStatusLabel(s) {
 
 // ── 成交模式（账号级） ────────────────────────────────────────
 
+let selectedExecutionMode = 'random';
 function applyFillModeUI(mode) {
-  const btnAuto   = document.getElementById('btn-mode-auto');
-  const btnManual = document.getElementById('btn-mode-manual');
-  btnAuto.classList.toggle('active', mode === 'auto');
-  btnManual.classList.toggle('active', mode === 'manual');
-  btnManual.classList.toggle('manual', mode === 'manual');
-  btnAuto.classList.remove('manual');
+  selectedExecutionMode = mode === 'auto' ? 'random' : mode;
+  ['random', 'manual', 'quote'].forEach(m => {
+    const button = document.getElementById(`btn-mode-${m}`);
+    button.classList.toggle('active', m === selectedExecutionMode);
+    button.setAttribute('aria-pressed', String(m === selectedExecutionMode));
+  });
+  document.getElementById('quoteSettings').hidden = selectedExecutionMode !== 'quote';
+  document.getElementById('randomSettings').hidden = selectedExecutionMode !== 'random';
+  document.getElementById('executionHint').textContent = {
+    random: '按概率和延迟模拟成交。', manual: '请在“待成交”页处理订单。',
+    quote: 'SDK 注入行情后自动撮合；买单参考卖一，卖单参考买一。'
+  }[selectedExecutionMode];
+  loadQuoteStatus();
 }
 
 async function setAccountFillMode(mode) {
   if (!selectedAccountId) return;
+  const previous = selectedExecutionMode;
   applyFillModeUI(mode);
-  await saveAccountConfig();
+  if (!await saveAccountConfig()) applyFillModeUI(previous);
   if (mode === 'manual') refreshPendingBadge();
+}
+
+async function loadQuoteStatus() {
+  try {
+    const response = await fetch(`${BASE}/api/market-data/quotes`);
+    if (!response.ok) throw new Error('行情服务不可用');
+    const quotes = await response.json();
+    const maxAge = Number(document.getElementById('quoteMaxAge').value);
+    const fresh = quotes.filter(q => q.age_ms <= maxAge).length;
+    document.getElementById('quoteStatus').textContent = quotes.length
+      ? `已接收 ${quotes.length} 个证券，${fresh} 个在有效期内。` : '尚未收到行情。请通过 SDK 推送。';
+  } catch(e) { document.getElementById('quoteStatus').textContent = e.message; }
+}
+
+let quoteMonitorRows = [];
+let quoteMonitorBusy = false;
+let quotePage = 0;
+let quoteDetailSymbol = null;
+const QUOTE_PAGE_SIZE = 50;
+
+function quoteTimestamp(ms) {
+  return ms == null ? '—' : new Date(ms).toLocaleString('zh-CN', {hour12:false});
+}
+
+function quoteAge(ms) {
+  if (ms == null) return '—';
+  return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} 秒`;
+}
+
+async function loadQuoteMonitor() {
+  if (quoteMonitorBusy) return;
+  const maxAge = Number(document.getElementById('quoteMonitorMaxAge').value);
+  const error = document.getElementById('quoteMonitorError');
+  if (!Number.isInteger(maxAge) || maxAge < 0) {
+    error.textContent = '新鲜阈值须为非负整数（毫秒）。';
+    return;
+  }
+  quoteMonitorBusy = true;
+  try {
+    const responses = await Promise.all([
+      fetch(`${BASE}/api/market-data/status?max_age_ms=${maxAge}`),
+      fetch(`${BASE}/api/market-data/quotes?max_age_ms=${maxAge}`)
+    ]);
+    if (responses.some(r => !r.ok)) throw new Error('行情监控接口不可用，请确认服务已更新并启动。');
+    const [state, rows] = await Promise.all(responses.map(r => r.json()));
+    quoteMonitorRows = rows.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    const feed = document.getElementById('quoteFeedState');
+    feed.textContent = {never:'尚未收到行情推送', recent:'最近收到行情推送', idle:'最近无行情推送'}[state.feed_status];
+    feed.className = state.feed_status === 'recent' ? 'quote-fresh' : 'quote-stale';
+    document.getElementById('qmSymbols').textContent = state.symbol_count;
+    document.getElementById('qmFresh').textContent = state.fresh_count;
+    document.getElementById('qmStale').textContent = state.stale_count;
+    document.getElementById('quoteReceiptCounts').textContent = `本次启动：收到 ${state.received_count} 条有效格式推送，接受 ${state.accepted_count} 条，忽略重复 / 乱序 ${state.ignored_count} 条。`;
+    document.getElementById('quoteLastReceived').textContent = `最近接收：${quoteTimestamp(state.last_received_at)}（距今 ${quoteAge(state.last_received_age_ms)}）；最近接受：${quoteTimestamp(state.last_accepted_at)}`;
+    document.getElementById('quoteCachePolicy').textContent = `存储：仅内存，每个证券一条快照；${state.retention_ms / 60000} 分钟未更新自动清理；上限 ${state.max_symbols} 个证券。`;
+    document.getElementById('quoteCleanupCounts').textContent = `本次启动已清理 ${state.expired_count} 条闲置快照、淘汰 ${state.evicted_count} 条超限快照。周期检查：${state.cleanup_interval_seconds} 秒，读写时也检查。`;
+    document.getElementById('quoteMonitorUpdated').textContent = `页面更新于 ${quoteTimestamp(Date.now())}。接收计数与行情列表分别采样，持续推送时可能有瞬时差异。`;
+    error.textContent = '';
+    renderQuoteMonitor();
+  } catch(e) {
+    document.getElementById('quoteFeedState').textContent = '无法读取推送状态';
+    document.getElementById('quoteFeedState').className = 'quote-stale';
+    ['qmSymbols', 'qmFresh', 'qmStale'].forEach(id => document.getElementById(id).textContent = '—');
+    error.textContent = `刷新失败：${e.message} 下方不显示旧快照；历史计数请以恢复后的刷新结果为准。`;
+    quoteMonitorRows = [];
+    renderQuoteMonitor();
+  } finally {
+    quoteMonitorBusy = false;
+  }
+}
+
+function renderQuoteMonitor() {
+  const search = document.getElementById('quoteSearch').value.trim().toLowerCase();
+  const filter = document.getElementById('quoteFreshFilter').value;
+  const rows = quoteMonitorRows.filter(q =>
+    `${q.symbol} ${q.source}`.toLowerCase().includes(search) &&
+    (filter === 'all' || (filter === 'stale' ? q.stale : !q.stale)));
+  const pages = Math.max(1, Math.ceil(rows.length / QUOTE_PAGE_SIZE));
+  quotePage = Math.max(0, Math.min(quotePage, pages - 1));
+  const tbody = document.getElementById('quotes-tbody');
+  tbody.replaceChildren();
+  const number = v => v == null ? '—' : Number(v).toLocaleString('zh-CN', {maximumFractionDigits:6});
+  for (const q of rows.slice(quotePage * QUOTE_PAGE_SIZE, (quotePage + 1) * QUOTE_PAGE_SIZE)) {
+    const row = document.createElement('tr');
+    const values = [q.symbol, number(q.last_price),
+      `${number(q.bid_price)} / ${number(q.bid_qty)}`, `${number(q.ask_price)} / ${number(q.ask_qty)}`,
+      quoteTimestamp(q.ts), quoteTimestamp(q.received_at),
+      `${quoteAge(q.age_ms)} / ${q.stale ? '过期' : '新鲜'}`,
+      {open:'开放', closed:'关闭', halted:'暂停'}[q.trading_status] || q.trading_status];
+    values.forEach((value, index) => {
+      const cell = document.createElement('td'); cell.textContent = value;
+      if (index === 0) {
+        const source = document.createElement('span'); source.className = 'quote-source';
+        source.textContent = q.source || '未标注来源'; source.title = source.textContent;
+        cell.appendChild(source);
+      }
+      if (index === 6) cell.className = q.stale ? 'quote-stale' : 'quote-fresh';
+      row.appendChild(cell);
+    });
+    const cell = document.createElement('td');
+    const button = document.createElement('button'); button.className = 'btn btn-primary btn-sm';
+    button.textContent = '查看'; button.setAttribute('aria-label', `查看 ${q.symbol} 行情数据`);
+    button.onclick = () => { quoteDetailSymbol = q.symbol; renderQuoteDetail(); document.getElementById('quoteDetails').open = true; };
+    cell.appendChild(button); row.appendChild(cell); tbody.appendChild(row);
+  }
+  if (!rows.length) {
+    const row = tbody.insertRow(); const cell = row.insertCell(); cell.colSpan = 9; cell.className = 'empty-hint';
+    cell.textContent = quoteMonitorRows.length ? '没有符合筛选条件的行情。' : '当前没有缓存行情。请通过 SDK 推送；闲置快照也可能已被自动清理。';
+  }
+  document.getElementById('quotePageInfo').textContent = `${rows.length} 条 · 第 ${quotePage + 1} / ${pages} 页`;
+  document.getElementById('quotePreviousPage').disabled = quotePage === 0;
+  document.getElementById('quoteNextPage').disabled = quotePage >= pages - 1;
+  renderQuoteDetail();
+}
+
+function renderQuoteDetail() {
+  if (!quoteDetailSymbol) return;
+  const quote = quoteMonitorRows.find(q => q.symbol === quoteDetailSymbol);
+  document.getElementById('quoteDetailTitle').textContent = `行情数据：${quoteDetailSymbol}`;
+  document.getElementById('quoteDetailData').textContent = quote
+    ? JSON.stringify(quote, null, 2) : '当前快照已被清理，或监控暂时不可用。';
+}
+
+async function copyQuoteExample() {
+  const code = document.getElementById('sdkQuoteExample');
+  try {
+    await navigator.clipboard.writeText(code.textContent);
+    document.getElementById('copyQuoteExample').textContent = '已复制';
+  } catch(e) {
+    const range = document.createRange(); range.selectNodeContents(code);
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    document.getElementById('copyQuoteExample').textContent = '已选中，请按 Ctrl+C';
+  }
 }
 
 // ── 待成交（手动模式） ────────────────────────────────────────
