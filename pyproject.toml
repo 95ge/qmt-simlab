@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qmt-simlab"
+version = "0.2.0"
+description = "Standalone QMT-compatible trading simulator and Python SDK"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "QMT SimLab Contributors" }]
+dependencies = [
+  "fastapi>=0.109,<1",
+  "uvicorn[standard]>=0.27,<1",
+  "sqlalchemy>=2.0,<3",
+  "requests>=2.28,<3",
+  "websockets>=12,<16",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7.4,<9",
+  "pytest-cov>=4,<7",
+]
+
+[project.scripts]
+qmt-simlab = "qmt_simulator.server:main"
+qmt-simlab-gateway = "qmt_simulator.gateway.gateway_main:main"
+
+[tool.setuptools.packages.find]
+include = ["qmt_simulator*", "qmt_sim_sdk*"]
+
+[tool.setuptools.package-data]
+qmt_simulator = ["web/static/index.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+

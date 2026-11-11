@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.venv/
+venv/
+.env
+
+# Runtime state
+data/*.db
+data/*.sqlite
+data/*.json
+data/gateway-cache/
+qmt_simulator/gateway/cache/
+
+# Local tooling
+.idea/
+.vscode/
+

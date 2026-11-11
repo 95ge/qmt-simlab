@@ -1,0 +1,1401 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XM 仿真执行器</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #21262d;
+    --accent: #00d4ff;
+    --accent-dim: #0a3d52;
+    --text: #c9d1d9;
+    --text-dim: #6e7681;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-mono); font-size: 13px; }
+
+  /* 顶栏 */
+  .topbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .topbar .logo { color: var(--accent); font-size: 15px; font-weight: 700; letter-spacing: 1px; }
+  .topbar .exec-id { color: var(--text-dim); font-size: 11px; }
+  .topbar .status-badge {
+    margin-left: auto; padding: 3px 10px; border-radius: 3px; font-size: 11px;
+    background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent);
+  }
+  .topbar .status-badge.offline { background: #2d1a1a; color: var(--red); border-color: var(--red); }
+
+  /* 主体三栏 */
+  .main { display: grid; grid-template-columns: 280px 260px 1fr; height: calc(100vh - 49px); }
+  .panel { border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .panel:last-child { border-right: none; }
+  .panel-header {
+    padding: 10px 16px; font-size: 11px; font-weight: 600; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--text-dim); border-bottom: 1px solid var(--border);
+    background: var(--surface); display: flex; align-items: center;
+  }
+  .panel-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+  /* 账号列表 */
+  .account-item {
+    padding: 10px 12px; border-radius: 4px; cursor: pointer; margin-bottom: 6px;
+    border: 1px solid var(--border); transition: border-color 0.15s;
+  }
+  .account-item:hover { border-color: var(--accent-dim); }
+  .account-item.active { border-color: var(--accent); background: var(--accent-dim); }
+  .account-item .acc-id { color: var(--accent); font-size: 13px; }
+  .account-item .acc-name { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+  .account-item .acc-cash { color: var(--green); font-size: 12px; margin-top: 4px; }
+
+  /* 账号详情 */
+  .detail-section { margin-bottom: 16px; }
+  .detail-label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; margin-bottom: 6px; }
+  .detail-value { color: var(--text); font-size: 14px; }
+  .detail-value.green { color: var(--green); }
+
+  .positions-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .positions-table th { color: var(--text-dim); text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--border); }
+  .positions-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+
+  .btn { padding: 5px 12px; border-radius: 3px; cursor: pointer; font-size: 11px; font-family: var(--font-mono); border: 1px solid; }
+  .btn-primary { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+  .btn-primary:hover { background: var(--accent); color: var(--bg); }
+  .btn-danger { background: #2d1a1a; color: var(--red); border-color: var(--red); }
+  .btn-danger:hover { background: var(--red); color: #fff; }
+  .btn-sm { padding: 3px 8px; font-size: 10px; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+
+  /* 场景控制 */
+  .scenario-row { margin-bottom: 14px; }
+  .scenario-label { display: flex; justify-content: space-between; color: var(--text-dim); font-size: 11px; margin-bottom: 4px; }
+  .scenario-label .val { color: var(--text); font-weight: 600; }
+  input[type=range] {
+    width: 100%; accent-color: var(--accent); cursor: pointer;
+    background: var(--border); border-radius: 4px; height: 4px;
+  }
+  input[type=number] {
+    width: 70px; padding: 4px 6px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text); border-radius: 3px; font-family: var(--font-mono); font-size: 12px;
+  }
+  input[type=number]:focus { outline: none; border-color: var(--accent); }
+  input[type=text] {
+    width: 100%; padding: 5px 8px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text); border-radius: 3px; font-family: var(--font-mono); font-size: 12px;
+    margin-bottom: 6px;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .delay-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .delay-row label { color: var(--text-dim); font-size: 11px; min-width: 80px; }
+
+  /* 标签栏 */
+  .tab-bar {
+    display: flex; border-bottom: 1px solid var(--border);
+    background: var(--surface); padding: 0 12px;
+  }
+  .tab-bar button {
+    padding: 8px 14px; background: none; border: none; border-bottom: 2px solid transparent;
+    color: var(--text-dim); font-family: var(--font-mono); font-size: 11px; cursor: pointer;
+    font-weight: 600; letter-spacing: 0.5px; transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-bar button:hover { color: var(--text); }
+  .tab-bar button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-content { display: none; flex: 1; overflow-y: auto; }
+  .tab-content.active { display: flex; flex-direction: column; }
+
+  /* 数据表格 */
+  .data-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .data-table th {
+    color: var(--text-dim); text-align: left; padding: 6px 10px;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+    position: sticky; top: 0; z-index: 1; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .data-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  .data-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .data-table .buy { color: var(--red); }
+  .data-table .sell { color: var(--green); }
+
+  /* 订单状态徽章 */
+  .order-badge {
+    padding: 1px 7px; border-radius: 2px; font-size: 10px;
+  }
+  .badge-submitted { background: #1a2a3a; color: #58a6ff; }
+  .badge-partial_filled { background: #2a1a0a; color: var(--yellow); }
+  .badge-filled { background: #0a2a0a; color: var(--green); }
+  .badge-rejected, .badge-canceled { background: #2a1a1a; color: var(--red); }
+
+  /* 算法任务 */
+  .algo-badge { padding: 1px 7px; border-radius: 2px; font-size: 10px; }
+  .algo-pending  { background: #1a1a2a; color: #8b8bff; }
+  .algo-running  { background: var(--accent-dim); color: var(--accent); }
+  .algo-paused   { background: #2a2a1a; color: var(--yellow); }
+  .algo-completed{ background: #0a2a0a; color: var(--green); }
+  .algo-cancelled{ background: #2a1a1a; color: var(--text-dim); }
+  .algo-failed   { background: #2a1a1a; color: var(--red); }
+  .progress-bar-wrap { width: 80px; background: var(--border); border-radius: 2px; height: 6px; display: inline-block; vertical-align: middle; }
+  .progress-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width 0.3s; }
+  .algo-ctrl-btn {
+    padding: 2px 7px; border-radius: 2px; cursor: pointer; font-size: 10px;
+    font-family: var(--font-mono); border: 1px solid; margin-left: 3px;
+  }
+
+  /* 过滤栏 */
+  .filter-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border);
+    background: var(--surface); flex-shrink: 0;
+  }
+  .filter-bar label { color: var(--text-dim); font-size: 10px; }
+  .filter-bar select {
+    padding: 3px 6px; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 3px; font-family: var(--font-mono); font-size: 11px;
+  }
+  .filter-bar select:focus { outline: none; border-color: var(--accent); }
+  .filter-bar .spacer { flex: 1; }
+
+  /* 模态框 */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    z-index: 100; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 20px; width: 340px;
+  }
+  .modal h3 { color: var(--accent); margin-bottom: 16px; font-size: 14px; }
+  .modal label { display: block; color: var(--text-dim); font-size: 11px; margin-bottom: 4px; }
+  .modal-footer { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+
+  /* 滚动条 */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  .section-divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  .empty-hint { color: var(--text-dim); font-size: 11px; text-align: center; padding: 20px; }
+  /* 时间筛选输入框 */
+  .filter-bar input[type=date] {
+    padding: 3px 6px; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); border-radius: 3px; font-family: var(--font-mono); font-size: 11px;
+    color-scheme: dark;
+  }
+  .filter-bar input[type=date]:focus { outline: none; border-color: var(--accent); }
+  /* 加载更多 */
+  .load-more-bar {
+    display: flex; align-items: center; justify-content: center;
+    padding: 10px; border-top: 1px solid var(--border); flex-shrink: 0;
+  }
+  .load-more-bar button {
+    padding: 4px 16px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: 3px; font-family: var(--font-mono);
+    font-size: 11px; cursor: pointer;
+  }
+  .load-more-bar button:hover { border-color: var(--accent); color: var(--accent); }
+  .load-more-bar .end-hint { color: var(--text-dim); font-size: 11px; }
+
+  /* 成交模式切换 */
+  .fill-mode-group {
+    display: flex; align-items: center; gap: 6px; margin-left: 16px;
+  }
+  .fill-mode-label { color: var(--text-dim); font-size: 11px; }
+  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+  .mode-btn {
+    padding: 3px 10px; background: none; border: none; cursor: pointer;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+    transition: background 0.15s, color 0.15s;
+  }
+  .mode-btn:first-child { border-right: 1px solid var(--border); }
+  .mode-btn.active { background: var(--accent-dim); color: var(--accent); }
+  .mode-btn.active.manual { background: #2d1a0a; color: var(--yellow); }
+
+  /* 待成交 badge */
+  .pending-count {
+    display: inline-block; background: var(--yellow); color: var(--bg);
+    border-radius: 8px; font-size: 10px; padding: 0 5px; min-width: 16px;
+    text-align: center; margin-left: 4px; font-weight: 700;
+  }
+
+  /* 手动成交操作按钮 */
+  .fill-action-btn {
+    padding: 2px 7px; border-radius: 2px; cursor: pointer; font-size: 10px;
+    font-family: var(--font-mono); border: 1px solid; margin-left: 3px;
+  }
+  .fill-action-fill { background: #0a2a0a; color: var(--green); border-color: var(--green); }
+  .fill-action-fill:hover { background: var(--green); color: var(--bg); }
+  .fill-action-reject { background: #2a1a1a; color: var(--red); border-color: var(--red); }
+  .fill-action-reject:hover { background: var(--red); color: #fff; }
+  .fill-action-cancel { background: var(--surface); color: var(--text-dim); border-color: var(--border); }
+  .fill-action-cancel:hover { border-color: var(--text-dim); color: var(--text); }
+</style>
+</head>
+<body>
+
+<!-- 顶栏 -->
+<div class="topbar">
+  <span class="logo">XM 仿真执行器</span>
+  <span class="exec-id" id="execId">executor-id: —</span>
+  <span class="status-badge offline" id="statusBadge">● 未连接</span>
+</div>
+
+<!-- 主体 -->
+<div class="main">
+
+  <!-- 左栏：账号管理 -->
+  <div class="panel">
+    <div class="panel-header">
+      账号管理
+      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="showCreateModal()">+ 新建</button>
+    </div>
+    <div class="panel-body">
+      <div id="accountList"></div>
+      <hr class="section-divider">
+      <div id="accountDetail" style="display:none">
+        <div class="detail-section">
+          <div class="detail-label">可用现金</div>
+          <div class="detail-value green" id="detailCash">—</div>
+        </div>
+        <div class="detail-section">
+          <div class="detail-label">持仓</div>
+          <table class="positions-table">
+            <thead><tr><th>代码</th><th>数量</th><th>成本价</th></tr></thead>
+            <tbody id="detailPositions"></tbody>
+          </table>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary btn-sm" onclick="showEditModal()">编辑</button>
+          <button class="btn btn-primary btn-sm" onclick="resetAccount()">重置</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteAccount()">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 中栏：场景控制 -->
+  <div class="panel">
+    <div class="panel-header">
+      场景控制
+      <span id="scenarioAccLabel" style="margin-left:8px;color:var(--accent);font-size:11px"></span>
+    </div>
+    <div class="panel-body">
+      <div id="noAccHint" style="color:var(--text-dim);font-size:11px;text-align:center;padding:16px 0">
+        请先在左侧选择账号
+      </div>
+      <div id="scenarioBody" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+        <div class="detail-label" style="margin:0">成交模式</div>
+        <div class="mode-toggle">
+          <button id="btn-mode-auto" class="mode-btn active" onclick="setAccountFillMode('auto')">自动</button>
+          <button id="btn-mode-manual" class="mode-btn" onclick="setAccountFillMode('manual')">手动</button>
+        </div>
+      </div>
+      <hr class="section-divider" style="margin-top:0">
+      <div class="detail-label" style="margin-bottom:10px">成交概率</div>
+
+      <div class="scenario-row">
+        <div class="scenario-label"><span>全部成交</span><span class="val" id="lbl_filled">60%</span></div>
+        <input type="range" id="sl_filled" min="0" max="100" value="60" oninput="syncSlider('filled')">
+      </div>
+      <div class="scenario-row">
+        <div class="scenario-label"><span>部分成交</span><span class="val" id="lbl_partial_filled">20%</span></div>
+        <input type="range" id="sl_partial_filled" min="0" max="100" value="20" oninput="syncSlider('partial_filled')">
+      </div>
+      <div class="scenario-row">
+        <div class="scenario-label"><span>拒绝</span><span class="val" id="lbl_rejected">10%</span></div>
+        <input type="range" id="sl_rejected" min="0" max="100" value="10" oninput="syncSlider('rejected')">
+      </div>
+      <div class="scenario-row">
+        <div class="scenario-label"><span>撤单</span><span class="val" id="lbl_canceled">10%</span></div>
+        <input type="range" id="sl_canceled" min="0" max="100" value="10" oninput="syncSlider('canceled')">
+      </div>
+      <div id="probError" style="color:var(--red);font-size:11px;min-height:16px;margin-bottom:8px"></div>
+      <button class="btn btn-primary" onclick="saveScenario()" style="width:100%">应用概率</button>
+
+      <hr class="section-divider">
+      <div class="detail-label" style="margin-bottom:10px">成交延迟</div>
+      <div class="delay-row"><label>首次延迟(s)</label><input type="number" id="dly_initial" value="5" min="0" step="0.5"></div>
+      <div class="delay-row"><label>批次间隔 min</label><input type="number" id="dly_min" value="1" min="0" step="0.1"></div>
+      <div class="delay-row"><label>批次间隔 max</label><input type="number" id="dly_max" value="2" min="0" step="0.1"></div>
+      <div class="delay-row"><label>批次数 min</label><input type="number" id="dly_bmin" value="2" min="1"></div>
+      <div class="delay-row"><label>批次数 max</label><input type="number" id="dly_bmax" value="4" min="1"></div>
+      <button class="btn btn-primary" onclick="saveDelay()" style="width:100%;margin-top:4px">应用延迟</button>
+
+      <hr class="section-divider">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div class="detail-label" style="margin:0">手续费配置</div>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;color:var(--text-dim)">
+          <input type="checkbox" id="comm_enabled" onchange="onCommEnabledChange()" style="accent-color:var(--accent)">
+          启用
+        </label>
+      </div>
+      <div id="commFields">
+        <div class="delay-row">
+          <label>佣金费率</label>
+          <input type="number" id="comm_rate" value="0.00025" min="0" max="0.01" step="0.00005" style="width:90px" oninput="updateCommLabels()">
+          <span id="comm_rate_label" style="font-size:10px;color:var(--text-dim)">万2.5</span>
+        </div>
+        <div class="delay-row">
+          <label>最低佣金(元)</label>
+          <input type="number" id="comm_min" value="5" min="0" step="1" style="width:90px">
+        </div>
+        <div class="delay-row">
+          <label>印花税率</label>
+          <input type="number" id="comm_stamp" value="0.001" min="0" max="0.01" step="0.0001" style="width:90px" oninput="updateCommLabels()">
+          <span id="comm_stamp_label" style="font-size:10px;color:var(--text-dim)">千1</span>
+        </div>
+        <div class="delay-row">
+          <label>过户费率</label>
+          <input type="number" id="comm_transfer" value="0.00002" min="0" max="0.001" step="0.000005" style="width:90px" oninput="updateCommLabels()">
+          <span id="comm_transfer_label" style="font-size:10px;color:var(--text-dim)">万0.2</span>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="saveCommission()" style="width:100%;margin-top:4px">应用手续费</button>
+
+      <hr class="section-divider">
+      <div class="detail-label" style="margin-bottom:10px">快速下单</div>
+      <div class="delay-row">
+        <label>代码</label>
+        <input type="text" id="trade_symbol" placeholder="如 000001.SZ" style="width:110px;text-transform:uppercase">
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button id="btn-dir-buy"  class="mode-btn active" onclick="setTradeDir('buy')"  style="flex:1">买入</button>
+        <button id="btn-dir-sell" class="mode-btn"        onclick="setTradeDir('sell')" style="flex:1">卖出</button>
+      </div>
+      <div style="display:flex;gap:6px;margin-bottom:8px">
+        <button id="btn-pt-limit"  class="mode-btn active" onclick="setTradePriceType('limit')"  style="flex:1">限价</button>
+        <button id="btn-pt-market" class="mode-btn"        onclick="setTradePriceType('market')" style="flex:1">市价</button>
+      </div>
+      <div class="delay-row">
+        <label>价格</label>
+        <input type="number" id="trade_price" min="0.01" step="0.01" style="width:90px" placeholder="0.00">
+      </div>
+      <div class="delay-row">
+        <label>数量（手）</label>
+        <input type="number" id="trade_qty" min="1" step="1" style="width:90px" placeholder="100">
+      </div>
+      <div id="tradeQuickError" style="color:var(--red);font-size:11px;min-height:14px"></div>
+      <button class="btn btn-primary" onclick="submitQuickTrade()" style="width:100%;margin-top:2px">下单</button>
+      <button class="btn" onclick="submitTestBuy()" style="width:100%;margin-top:6px;background:var(--border);color:var(--text-dim);border-color:var(--border)">测试买入 601222.SH</button>
+      </div><!-- /scenarioBody -->
+    </div>
+  </div>
+
+  <!-- 右栏：委托 / 成交 / 持仓 -->
+  <div class="panel" style="display:flex;flex-direction:column">
+    <div class="panel-header" style="padding:0">
+      <div class="tab-bar" style="flex:1;border-bottom:none">
+        <button id="tab-orders" class="active" onclick="switchTab('orders')">委托</button>
+        <button id="tab-trades" onclick="switchTab('trades')">成交</button>
+        <button id="tab-positions" onclick="switchTab('positions')">持仓</button>
+        <button id="tab-algos" onclick="switchTab('algos')">算法任务</button>
+        <button id="tab-pending" onclick="switchTab('pending')">待成交<span id="pending-badge" class="pending-count" style="display:none">0</span></button>
+      </div>
+      <button class="btn btn-sm" style="margin-right:12px;background:var(--border);color:var(--text-dim);border-color:var(--border)" onclick="refreshActive()">刷新</button>
+    </div>
+
+    <!-- 委托 tab -->
+    <div class="tab-content active" id="pane-orders">
+      <div class="filter-bar">
+        <label>状态</label>
+        <select id="filter-order-status" onchange="resetAndLoad('orders')">
+          <option value="">全部</option>
+          <option value="submitted">已报</option>
+          <option value="partial_filled">部分成交</option>
+          <option value="filled">已成交</option>
+          <option value="rejected">已拒绝</option>
+          <option value="canceled">已撤单</option>
+        </select>
+        <label>从</label>
+        <input type="date" id="filter-order-from" onchange="resetAndLoad('orders')">
+        <label>至</label>
+        <input type="date" id="filter-order-to" onchange="resetAndLoad('orders')">
+        <span class="spacer"></span>
+      </div>
+      <div style="flex:1;overflow-y:auto" id="orders-scroll">
+        <table class="data-table">
+          <thead>
+            <tr><th>代码</th><th>方向</th><th>委托价</th><th>数量</th><th>成交量</th><th>状态</th><th>时间</th><th>委托单号</th></tr>
+          </thead>
+          <tbody id="orders-tbody">
+            <tr><td colspan="7" class="empty-hint">请先在左侧选择账号</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="load-more-bar" id="orders-more" style="display:none">
+        <button onclick="loadMore('orders')">加载更多</button>
+      </div>
+    </div>
+
+    <!-- 成交 tab -->
+    <div class="tab-content" id="pane-trades">
+      <div class="filter-bar">
+        <label>从</label>
+        <input type="date" id="filter-trade-from" onchange="resetAndLoad('trades')">
+        <label>至</label>
+        <input type="date" id="filter-trade-to" onchange="resetAndLoad('trades')">
+        <span class="spacer"></span>
+      </div>
+      <div style="flex:1;overflow-y:auto" id="trades-scroll">
+        <table class="data-table">
+          <thead>
+            <tr><th>代码</th><th>方向</th><th>成交价</th><th>成交量</th><th>成交额</th><th>手续费</th><th>时间</th><th>委托单号</th></tr>
+          </thead>
+          <tbody id="trades-tbody">
+            <tr><td colspan="7" class="empty-hint">请先在左侧选择账号</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="load-more-bar" id="trades-more" style="display:none">
+        <button onclick="loadMore('trades')">加载更多</button>
+      </div>
+    </div>
+
+    <!-- 持仓 tab -->
+    <div class="tab-content" id="pane-positions">
+      <div style="flex:1;overflow-y:auto">
+        <table class="data-table">
+          <thead>
+            <tr><th>代码</th><th>持仓量</th><th>可用量</th><th>成本价</th><th>市值</th><th>操作</th></tr>
+          </thead>
+          <tbody id="positions-tbody">
+            <tr><td colspan="6" class="empty-hint">请先在左侧选择账号</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 待成交 tab（手动模式）-->
+    <div class="tab-content" id="pane-pending">
+      <div style="padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;display:flex;align-items:center;gap:10px">
+        <span style="font-size:11px;color:var(--text-dim)">手动模式下，每笔委托需要在此手动决策成交结果</span>
+        <button class="btn btn-sm" style="margin-left:auto;background:var(--border);color:var(--text-dim);border-color:var(--border)" onclick="loadPendingFills()">刷新</button>
+      </div>
+      <div style="flex:1;overflow-y:auto">
+        <table class="data-table">
+          <thead>
+            <tr><th>订单ID</th><th>代码</th><th>方向</th><th>委托价</th><th>委托量</th><th>操作</th></tr>
+          </thead>
+          <tbody id="pending-tbody">
+            <tr><td colspan="6" class="empty-hint">暂无待处理委托</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 算法任务 tab -->
+    <div class="tab-content" id="pane-algos">
+      <div class="filter-bar">
+        <label>状态</label>
+        <select id="filter-algo-status" onchange="loadAlgos()">
+          <option value="">全部</option>
+          <option value="pending">待启动</option>
+          <option value="running">执行中</option>
+          <option value="paused">已暂停</option>
+          <option value="completed">已完成</option>
+          <option value="cancelled">已取消</option>
+          <option value="failed">失败</option>
+        </select>
+        <span class="spacer"></span>
+      </div>
+      <div style="flex:1;overflow-y:auto">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>任务ID</th><th>算法</th><th>代码</th><th>方向</th><th>进度</th>
+              <th>成交/总量</th><th>均价</th><th>状态</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="algos-tbody">
+            <tr><td colspan="9" class="empty-hint">暂无算法任务</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- 编辑账号模态框 -->
+<div class="modal-overlay" id="editModal">
+  <div class="modal">
+    <h3>编辑账号</h3>
+    <label>账号 ID</label>
+    <input type="text" id="editAccId" disabled style="opacity:0.5;cursor:not-allowed">
+    <label>显示名称</label>
+    <input type="text" id="editAccName" placeholder="账号显示名称">
+    <label>可用现金（元）</label>
+    <input type="number" id="editAccCash" min="0" step="10000" style="width:100%;margin-bottom:4px">
+    <div style="color:var(--text-dim);font-size:10px;margin-bottom:6px">直接修改当前可用资金余额</div>
+    <div id="editError" style="color:var(--red);font-size:11px;min-height:14px"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="hideEditModal()" style="background:var(--border);color:var(--text);border-color:var(--border)">取消</button>
+      <button class="btn btn-primary" onclick="saveEdit()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 下单模态框 -->
+<div class="modal-overlay" id="tradeModal">
+  <div class="modal">
+    <h3 id="tradeModalTitle">下单</h3>
+    <label>代码</label>
+    <input type="text" id="modal_symbol" placeholder="如 000001.SZ" style="width:100%;margin-bottom:8px;text-transform:uppercase">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <div style="flex:1">
+        <label style="display:block;margin-bottom:4px">方向</label>
+        <div style="display:flex;gap:4px">
+          <button id="modal-btn-buy"  class="mode-btn active" onclick="setModalDir('buy')"  style="flex:1">买入</button>
+          <button id="modal-btn-sell" class="mode-btn"        onclick="setModalDir('sell')" style="flex:1">卖出</button>
+        </div>
+      </div>
+      <div style="flex:1">
+        <label style="display:block;margin-bottom:4px">价格类型</label>
+        <div style="display:flex;gap:4px">
+          <button id="modal-btn-limit"  class="mode-btn active" onclick="setModalPriceType('limit')"  style="flex:1">限价</button>
+          <button id="modal-btn-market" class="mode-btn"        onclick="setModalPriceType('market')" style="flex:1">市价</button>
+        </div>
+      </div>
+    </div>
+    <label>价格（元）</label>
+    <input type="number" id="modal_price" min="0.01" step="0.01" style="width:100%;margin-bottom:8px" placeholder="0.00">
+    <label>数量（手）</label>
+    <input type="number" id="modal_qty" min="1" step="1" style="width:100%;margin-bottom:4px" placeholder="100">
+    <div id="tradeModalError" style="color:var(--red);font-size:11px;min-height:14px"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="hideTradeModal()" style="background:var(--border);color:var(--text);border-color:var(--border)">取消</button>
+      <button class="btn btn-primary" onclick="submitTradeModal()">提交委托</button>
+    </div>
+  </div>
+</div>
+
+<!-- 手动成交 - 自定义数量价格模态框 -->
+<div class="modal-overlay" id="fillCustomModal">
+  <div class="modal">
+    <h3 id="fillCustomTitle">手动成交</h3>
+    <div id="fillCustomInfo" style="margin-bottom:12px;color:var(--text-dim);font-size:11px;line-height:1.6"></div>
+    <label>成交数量（手）</label>
+    <input type="number" id="fillCustomQty" min="1" step="1" style="width:100%;margin-bottom:8px">
+    <label>成交价格（元）</label>
+    <input type="number" id="fillCustomPrice" min="0.01" step="0.01" style="width:100%;margin-bottom:4px">
+    <div id="fillCustomError" style="color:var(--red);font-size:11px;min-height:14px"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="hideFillCustomModal()" style="background:var(--border);color:var(--text);border-color:var(--border)">取消</button>
+      <button class="btn btn-primary" onclick="confirmFillCustom()">确认成交</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建账号模态框 -->
+<div class="modal-overlay" id="createModal">
+  <div class="modal">
+    <h3>新建仿真账号</h3>
+    <label>账号 ID（fund_account_id）</label>
+    <input type="text" id="newAccId" placeholder="如：10104711">
+    <label>显示名称</label>
+    <input type="text" id="newAccName" placeholder="如：测试账号">
+    <label>初始现金（元）</label>
+    <input type="number" id="newAccCash" value="1000000" min="0" step="10000" style="width:100%;margin-bottom:6px">
+    <div id="createError" style="color:var(--red);font-size:11px;min-height:14px"></div>
+    <div class="modal-footer">
+      <button class="btn" onclick="hideCreateModal()" style="background:var(--border);color:var(--text);border-color:var(--border)">取消</button>
+      <button class="btn btn-primary" onclick="createAccount()">创建</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = '';
+const PAGE_SIZE = 50;
+let selectedAccountId = null;
+let sliderValues = { filled: 60, partial_filled: 20, rejected: 10, canceled: 10 };
+let activeTab = 'orders';
+let allAccounts = [];
+// 每个 tab 的懒加载偏移量
+const offsets = { orders: 0, trades: 0 };
+// 是否还有更多数据
+const hasMore = { orders: false, trades: false };
+// 手动成交待决策订单（用于模态框）
+let _fillCustomOrderId = null;
+let _fillCustomMaxQty = 0;
+
+// ── 回调事件驱动刷新 ──────────────────────────────────────────
+
+let _callbackCursor = 0;
+
+async function startCallbackPolling() {
+  // 初始化 cursor：拉取当前所有事件，记住最大 id，避免把历史事件触发刷新
+  try {
+    const r = await fetch(`${BASE}/api/callbacks?since=0`);
+    const all = await r.json().catch(() => []);
+    if (all.length) _callbackCursor = all[all.length - 1].id;
+  } catch(e) {}
+
+  setInterval(pollCallbacks, 500);
+}
+
+async function pollCallbacks() {
+  if (!selectedAccountId) return;
+  try {
+    const r = await fetch(`${BASE}/api/callbacks?since=${_callbackCursor}`);
+    if (!r.ok) return;
+    const events = await r.json().catch(() => []);
+    if (!events.length) return;
+
+    let hasOrder = false, hasTrade = false;
+    for (const ev of events) {
+      if (ev.id > _callbackCursor) _callbackCursor = ev.id;
+      // 只处理属于当前选中账号的事件
+      const acct = ev.data && (ev.data.account_id || ev.data.fund_account_id);
+      if (acct && acct !== selectedAccountId) continue;
+      if (ev.type === 'order_callback') hasOrder = true;
+      if (ev.type === 'trade_callback') hasTrade = true;
+    }
+
+    if (hasOrder && activeTab === 'orders') loadOrders(true);
+    if (hasTrade  && activeTab === 'trades') loadTrades(true);
+    if (hasTrade  && activeTab === 'positions') loadPositions();
+    if (hasOrder || hasTrade) loadAccountDetail(selectedAccountId);
+  } catch(e) {}
+}
+
+// ── 初始化 ────────────────────────────────────────────────────
+
+async function init() {
+  await loadStatus();
+  await loadAccounts();
+  document.getElementById('noAccHint').style.display = '';
+  document.getElementById('scenarioBody').style.display = 'none';
+  setInterval(loadStatus, 5000);
+  // 持仓、算法任务、待成交 仍用定时刷新
+  setInterval(() => {
+    if (!selectedAccountId) return;
+    if (activeTab === 'positions') loadPositions();
+    else if (activeTab === 'algos') loadAlgos();
+  }, 3000);
+  // 无论当前 tab，都定时轮询 pending count（用于更新 badge）
+  setInterval(refreshPendingBadge, 3000);
+  setInterval(() => { if (selectedAccountId) loadAccountDetail(selectedAccountId); }, 5000);
+  // 委托/成交：轮询 callbacks，有新事件才刷新
+  startCallbackPolling();
+}
+
+// ── 标签切换 ─────────────────────────────────────────────────
+
+function switchTab(tab) {
+  activeTab = tab;
+  ['orders', 'trades', 'positions', 'algos', 'pending'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+    document.getElementById(`pane-${t}`).classList.toggle('active', t === tab);
+  });
+  refreshActive();
+}
+
+function refreshActive() {
+  if (activeTab === 'pending') { loadPendingFills(); return; }
+  if (!selectedAccountId) return;
+  if (activeTab === 'orders') resetAndLoad('orders');
+  else if (activeTab === 'trades') resetAndLoad('trades');
+  else if (activeTab === 'positions') loadPositions();
+  else if (activeTab === 'algos') loadAlgos();
+}
+
+// 重置偏移量后重新加载（筛选条件变化时调用）
+function resetAndLoad(tab) {
+  offsets[tab] = 0;
+  if (tab === 'orders') loadOrders(true);
+  else if (tab === 'trades') loadTrades(true);
+}
+
+// 加载更多
+function loadMore(tab) {
+  offsets[tab] += PAGE_SIZE;
+  if (tab === 'orders') loadOrders(true);
+  else if (tab === 'trades') loadTrades(true);
+}
+
+// ── 状态 ─────────────────────────────────────────────────────
+
+async function loadStatus() {
+  try {
+    const r = await fetch(`${BASE}/api/status`);
+    const d = await r.json();
+    document.getElementById('execId').textContent = `executor-id: ${d.executor_id}`;
+    const badge = document.getElementById('statusBadge');
+    if (d.gateway_connected) {
+      badge.textContent = '● 已连接中台';
+      badge.className = 'status-badge';
+    } else {
+      badge.textContent = '● 未连接';
+      badge.className = 'status-badge offline';
+    }
+  } catch(e) {}
+}
+
+// ── 账号 ─────────────────────────────────────────────────────
+
+async function loadAccounts() {
+  try {
+    const r = await fetch(`${BASE}/api/accounts`);
+    allAccounts = await r.json();
+    const el = document.getElementById('accountList');
+    if (!allAccounts.length) { el.innerHTML = '<div class="empty-hint">暂无账号，点击右上角新建</div>'; return; }
+    el.innerHTML = allAccounts.map(a => `
+      <div class="account-item ${a.id === selectedAccountId ? 'active' : ''}" onclick="selectAccount('${a.id}')">
+        <div class="acc-id">${a.id}</div>
+        <div class="acc-name">${a.name}</div>
+        <div class="acc-cash">¥ ${fmtNum(a.cash)}</div>
+      </div>`).join('');
+    updateAccountFilters();
+  } catch(e) {}
+}
+
+function updateAccountFilters() {
+  // 账号选择已统一由左侧列表控制，无需更新下拉框
+}
+
+async function selectAccount(id) {
+  selectedAccountId = id;
+  await loadAccounts();
+  await loadAccountDetail(id);
+  await loadAccountConfig(id);
+  // 切换账号时重置并重载当前 tab
+  resetAndLoad('orders');
+  resetAndLoad('trades');
+  loadPositions();
+  loadAlgos();
+}
+
+async function loadAccountDetail(id) {
+  try {
+    const r = await fetch(`${BASE}/api/accounts/${id}`);
+    const acc = await r.json();
+    document.getElementById('detailCash').textContent = `¥ ${fmtNum(acc.cash)}`;
+    const tbody = document.getElementById('detailPositions');
+    if (!acc.positions.length) {
+      tbody.innerHTML = '<tr><td colspan="3" style="color:var(--text-dim);padding:8px 0">空仓</td></tr>';
+    } else {
+      tbody.innerHTML = acc.positions.map(p => `
+        <tr><td>${p.symbol}</td><td>${p.quantity}</td><td>${p.cost_price.toFixed(2)}</td></tr>`).join('');
+    }
+    document.getElementById('accountDetail').style.display = 'block';
+  } catch(e) {}
+}
+
+async function resetAccount() {
+  if (!selectedAccountId || !confirm(`确认重置账号 ${selectedAccountId}？`)) return;
+  await fetch(`${BASE}/api/accounts/${selectedAccountId}/reset`, { method: 'POST' });
+  loadAccountDetail(selectedAccountId);
+  loadAccounts();
+}
+
+async function deleteAccount() {
+  if (!selectedAccountId || !confirm(`确认删除账号 ${selectedAccountId}？`)) return;
+  await fetch(`${BASE}/api/accounts/${selectedAccountId}`, { method: 'DELETE' });
+  selectedAccountId = null;
+  document.getElementById('accountDetail').style.display = 'none';
+  loadAccounts();
+}
+
+function showCreateModal() { document.getElementById('createModal').classList.add('show'); }
+function hideCreateModal() { document.getElementById('createModal').classList.remove('show'); document.getElementById('createError').textContent = ''; }
+
+async function showEditModal() {
+  if (!selectedAccountId) return;
+  try {
+    const r = await fetch(`${BASE}/api/accounts/${selectedAccountId}`);
+    const acc = await r.json();
+    document.getElementById('editAccId').value = acc.id;
+    document.getElementById('editAccName').value = acc.name;
+    document.getElementById('editAccCash').value = acc.cash;
+    document.getElementById('editError').textContent = '';
+    document.getElementById('editModal').classList.add('show');
+  } catch(e) { alert('加载账号信息失败'); }
+}
+function hideEditModal() { document.getElementById('editModal').classList.remove('show'); }
+
+async function saveEdit() {
+  const name = document.getElementById('editAccName').value.trim();
+  const cash = parseFloat(document.getElementById('editAccCash').value);
+  if (!name) { document.getElementById('editError').textContent = '名称不能为空'; return; }
+  if (isNaN(cash) || cash < 0) { document.getElementById('editError').textContent = '请输入有效的资金金额'; return; }
+  const r = await fetch(`${BASE}/api/accounts/${selectedAccountId}`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, cash }),
+  });
+  if (r.ok) { hideEditModal(); loadAccounts(); loadAccountDetail(selectedAccountId); }
+  else { const e = await r.json(); document.getElementById('editError').textContent = e.detail || '保存失败'; }
+}
+
+async function createAccount() {
+  const id = document.getElementById('newAccId').value.trim();
+  const name = document.getElementById('newAccName').value.trim();
+  const cash = parseFloat(document.getElementById('newAccCash').value);
+  if (!id || !name) { document.getElementById('createError').textContent = '请填写账号 ID 和名称'; return; }
+  const r = await fetch(`${BASE}/api/accounts`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, name, initial_cash: cash, positions: [] }),
+  });
+  if (r.ok) { hideCreateModal(); loadAccounts(); }
+  else { const e = await r.json(); document.getElementById('createError').textContent = e.detail || '创建失败'; }
+}
+
+// ── 场景 ─────────────────────────────────────────────────────
+
+function syncSlider(key) {
+  sliderValues[key] = parseInt(document.getElementById(`sl_${key}`).value);
+  document.getElementById(`lbl_${key}`).textContent = `${sliderValues[key]}%`;
+  const total = Object.values(sliderValues).reduce((a, b) => a + b, 0);
+  document.getElementById('probError').textContent = total !== 100 ? `概率之和必须为 100%，当前：${total}%` : '';
+}
+
+async function loadAccountConfig(id) {
+  try {
+    const r = await fetch(`${BASE}/api/accounts/${id}/config`);
+    const cfg = await r.json();
+    // 填入场景概率
+    const keys = ['filled', 'partial_filled', 'rejected', 'canceled'];
+    keys.forEach(k => {
+      const v = Math.round((cfg[`${k}_prob`] || 0) * 100);
+      sliderValues[k] = v;
+      document.getElementById(`sl_${k}`).value = v;
+      document.getElementById(`lbl_${k}`).textContent = `${v}%`;
+    });
+    // 延迟
+    document.getElementById('dly_initial').value = cfg.initial_delay ?? 5;
+    document.getElementById('dly_min').value = cfg.batch_interval_min ?? 1;
+    document.getElementById('dly_max').value = cfg.batch_interval_max ?? 2;
+    document.getElementById('dly_bmin').value = cfg.batch_count_min ?? 2;
+    document.getElementById('dly_bmax').value = cfg.batch_count_max ?? 4;
+    // 手续费
+    const comm = cfg.commission || {};
+    document.getElementById('comm_enabled').checked = comm.enabled ?? true;
+    document.getElementById('comm_rate').value = comm.commission_rate ?? 0.00025;
+    document.getElementById('comm_min').value = comm.min_commission ?? 5;
+    document.getElementById('comm_stamp').value = comm.stamp_duty_rate ?? 0.001;
+    document.getElementById('comm_transfer').value = comm.transfer_fee_rate ?? 0.00002;
+    updateCommLabels();
+    document.getElementById('commFields').style.opacity = (comm.enabled ?? true) ? '1' : '0.45';
+    // 成交模式
+    applyFillModeUI(cfg.fill_mode || 'auto');
+    // 显示/隐藏提示
+    document.getElementById('scenarioAccLabel').textContent = id;
+    document.getElementById('noAccHint').style.display = 'none';
+    document.getElementById('scenarioBody').style.display = '';
+  } catch(e) {}
+}
+
+function buildConfigPayload() {
+  return {
+    fill_mode: document.getElementById('btn-mode-manual').classList.contains('active') ? 'manual' : 'auto',
+    filled_prob: sliderValues.filled / 100,
+    partial_filled_prob: sliderValues.partial_filled / 100,
+    rejected_prob: sliderValues.rejected / 100,
+    canceled_prob: sliderValues.canceled / 100,
+    initial_delay: parseFloat(document.getElementById('dly_initial').value),
+    batch_interval_min: parseFloat(document.getElementById('dly_min').value),
+    batch_interval_max: parseFloat(document.getElementById('dly_max').value),
+    batch_count_min: parseInt(document.getElementById('dly_bmin').value),
+    batch_count_max: parseInt(document.getElementById('dly_bmax').value),
+    commission: {
+      enabled: document.getElementById('comm_enabled').checked,
+      commission_rate: parseFloat(document.getElementById('comm_rate').value),
+      min_commission: parseFloat(document.getElementById('comm_min').value),
+      stamp_duty_rate: parseFloat(document.getElementById('comm_stamp').value),
+      transfer_fee_rate: parseFloat(document.getElementById('comm_transfer').value),
+    }
+  };
+}
+
+async function saveAccountConfig() {
+  if (!selectedAccountId) return;
+  const r = await fetch(`${BASE}/api/accounts/${selectedAccountId}/config`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildConfigPayload()),
+  });
+  if (!r.ok) { const e = await r.json(); alert(e.detail || '保存失败'); }
+}
+
+async function saveScenario() {
+  if (!selectedAccountId) { alert('请先选择账号'); return; }
+  const total = Object.values(sliderValues).reduce((a, b) => a + b, 0);
+  if (total !== 100) { document.getElementById('probError').textContent = `概率之和必须为 100%，当前：${total}%`; return; }
+  document.getElementById('probError').textContent = '';
+  await saveAccountConfig();
+}
+
+async function saveDelay() {
+  if (!selectedAccountId) { alert('请先选择账号'); return; }
+  await saveAccountConfig();
+}
+
+// ── 手续费 ───────────────────────────────────────────────────
+
+function updateCommLabels() {
+  const rate = parseFloat(document.getElementById('comm_rate').value) || 0;
+  document.getElementById('comm_rate_label').textContent = `万${(rate * 10000).toFixed(2)}`;
+  const stamp = parseFloat(document.getElementById('comm_stamp').value) || 0;
+  document.getElementById('comm_stamp_label').textContent = `千${(stamp * 1000).toFixed(2)}`;
+  const transfer = parseFloat(document.getElementById('comm_transfer').value) || 0;
+  document.getElementById('comm_transfer_label').textContent = `万${(transfer * 10000).toFixed(3)}`;
+}
+
+function onCommEnabledChange() {
+  const enabled = document.getElementById('comm_enabled').checked;
+  document.getElementById('commFields').style.opacity = enabled ? '1' : '0.45';
+}
+
+async function saveCommission() {
+  if (!selectedAccountId) { alert('请先选择账号'); return; }
+  await saveAccountConfig();
+  updateCommLabels();
+}
+
+// ── 委托 ─────────────────────────────────────────────────────
+
+async function loadOrders(reset = true) {
+  if (!selectedAccountId) return;
+  if (reset) offsets.orders = 0;
+  try {
+    const status = document.getElementById('filter-order-status').value;
+    const dateFrom = document.getElementById('filter-order-from').value;
+    const dateTo = document.getElementById('filter-order-to').value;
+    const params = [
+      `account_id=${encodeURIComponent(selectedAccountId)}`,
+      `limit=${PAGE_SIZE}`,
+      `offset=${offsets.orders}`,
+    ];
+    if (status) params.push(`status=${encodeURIComponent(status)}`);
+    if (dateFrom) params.push(`date_from=${dateFrom}`);
+    if (dateTo) params.push(`date_to=${dateTo}`);
+    const r = await fetch(`${BASE}/api/orders?${params.join('&')}`);
+    const orders = await r.json();
+    const tbody = document.getElementById('orders-tbody');
+    if (reset) tbody.innerHTML = '';
+    if (orders.length === 0 && offsets.orders === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">暂无委托</td></tr>';
+    } else {
+      tbody.insertAdjacentHTML('beforeend', orders.map(o => `
+        <tr>
+          <td style="color:var(--accent)">${o.symbol}</td>
+          <td class="${o.direction === 'buy' ? 'buy' : 'sell'}">${o.direction === 'buy' ? '买入' : '卖出'}</td>
+          <td>${o.price_type === 'market' ? '市价' : fmtPrice(o.price)}</td>
+          <td>${o.quantity}</td>
+          <td>${o.filled_qty || 0}</td>
+          <td><span class="order-badge badge-${o.status}">${statusLabel(o.status)}</span></td>
+          <td style="color:var(--text-dim)">${fmtTime(o.created_at)}</td>
+          <td style="color:var(--text-dim);font-size:10px" title="${o.id || ''}">…${(o.id || '').slice(-8)}</td>
+        </tr>`).join(''));
+    }
+    hasMore.orders = orders.length === PAGE_SIZE;
+    document.getElementById('orders-more').style.display = hasMore.orders ? '' : 'none';
+  } catch(e) {}
+}
+
+// ── 成交 ─────────────────────────────────────────────────────
+
+async function loadTrades(reset = true) {
+  if (!selectedAccountId) return;
+  if (reset) offsets.trades = 0;
+  try {
+    const dateFrom = document.getElementById('filter-trade-from').value;
+    const dateTo = document.getElementById('filter-trade-to').value;
+    const params = [
+      `account_id=${encodeURIComponent(selectedAccountId)}`,
+      `limit=${PAGE_SIZE}`,
+      `offset=${offsets.trades}`,
+    ];
+    if (dateFrom) params.push(`date_from=${dateFrom}`);
+    if (dateTo) params.push(`date_to=${dateTo}`);
+    const r = await fetch(`${BASE}/api/trades?${params.join('&')}`);
+    const trades = await r.json();
+    const tbody = document.getElementById('trades-tbody');
+    if (reset) tbody.innerHTML = '';
+    if (trades.length === 0 && offsets.trades === 0) {
+      tbody.innerHTML = '<tr><td colspan="8" class="empty-hint">暂无成交</td></tr>';
+    } else {
+      tbody.insertAdjacentHTML('beforeend', trades.map(t => `
+        <tr>
+          <td style="color:var(--accent)">${t.symbol}</td>
+          <td class="${t.direction === 'buy' ? 'buy' : 'sell'}">${t.direction === 'buy' ? '买入' : '卖出'}</td>
+          <td>${fmtPrice(t.price)}</td>
+          <td>${t.quantity}</td>
+          <td style="color:var(--yellow)">${fmtNum(t.amount || t.price * t.quantity)}</td>
+          <td style="color:var(--yellow)">${t.commission != null ? fmtNum(t.commission) : '—'}</td>
+          <td style="color:var(--text-dim)">${fmtTime(t.trade_time)}</td>
+          <td style="color:var(--text-dim);font-size:10px" title="${t.order_id || ''}">…${(t.order_id || '').slice(-8)}</td>
+        </tr>`).join(''));
+    }
+    hasMore.trades = trades.length === PAGE_SIZE;
+    document.getElementById('trades-more').style.display = hasMore.trades ? '' : 'none';
+  } catch(e) {}
+}
+
+// ── 持仓 ─────────────────────────────────────────────────────
+
+async function loadPositions() {
+  const tbody = document.getElementById('positions-tbody');
+  if (!selectedAccountId) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-hint">请先在左侧选择账号</td></tr>';
+    return;
+  }
+  try {
+    const r = await fetch(`${BASE}/api/accounts/${selectedAccountId}/positions`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const positions = data.positions || data || [];
+    if (!positions.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-hint">暂无持仓</td></tr>';
+      return;
+    }
+    tbody.innerHTML = positions.map(p => {
+      const marketVal = (p.cost_price || 0) * (p.quantity || 0);
+      const avail = p.available_qty !== undefined ? p.available_qty : p.quantity || 0;
+      return `<tr>
+        <td style="color:var(--accent)">${p.symbol}</td>
+        <td>${p.quantity || 0}</td>
+        <td>${avail}</td>
+        <td>${fmtPrice(p.cost_price)}</td>
+        <td style="color:var(--yellow)">${fmtNum(marketVal)}</td>
+        <td style="white-space:nowrap">
+          <button class="fill-action-btn fill-action-reject" style="margin-right:4px"
+            onclick="openTradeModal('${p.symbol}','sell',${avail},${p.cost_price || 0})">平仓</button>
+          <button class="fill-action-btn fill-action-fill"
+            onclick="openTradeModal('${p.symbol}','buy',0,${p.cost_price || 0})">加仓</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {}
+}
+
+// ── 算法任务 ─────────────────────────────────────────────────
+
+async function loadAlgos() {
+  try {
+    const status = document.getElementById('filter-algo-status').value;
+    const params = [];
+    if (selectedAccountId) params.push(`account_id=${encodeURIComponent(selectedAccountId)}`);
+    if (status) params.push(`status=${encodeURIComponent(status)}`);
+    const url = `${BASE}/api/algo${params.length ? '?' + params.join('&') : ''}`;
+    const r = await fetch(url);
+    const tasks = await r.json();
+    const tbody = document.getElementById('algos-tbody');
+    if (!tasks.length) {
+      tbody.innerHTML = '<tr><td colspan="9" class="empty-hint">暂无算法任务</td></tr>';
+      return;
+    }
+    tbody.innerHTML = tasks.map(t => {
+      const pct = Math.min(100, Math.round(t.progress || 0));
+      const algoLabel = { market:'市价', limit:'限价', twap:'TWAP', vwap:'VWAP',
+        pov:'POV', iceberg:'冰山', limit_up:'抢涨停', fast_trade:'快速', stealth:'隐秘' };
+      const active = t.status === 'running' || t.status === 'paused';
+      const canPause  = t.status === 'running';
+      const canResume = t.status === 'paused';
+      return `<tr>
+        <td style="color:var(--text-dim);font-size:10px" title="${t.algo_id}">…${t.algo_id.slice(-8)}</td>
+        <td style="color:var(--accent)">${algoLabel[t.algo_type] || t.algo_type}</td>
+        <td style="color:var(--accent)">${t.symbol}</td>
+        <td class="${t.direction === 'buy' ? 'buy' : 'sell'}">${t.direction === 'buy' ? '买入' : '卖出'}</td>
+        <td>
+          <div class="progress-bar-wrap"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+          <span style="font-size:10px;color:var(--text-dim);margin-left:4px">${pct}%</span>
+        </td>
+        <td>${t.filled_quantity}/${t.total_quantity}</td>
+        <td>${t.avg_price ? t.avg_price.toFixed(2) : '-'}</td>
+        <td><span class="algo-badge algo-${t.status}">${algoStatusLabel(t.status)}</span></td>
+        <td>
+          ${canPause  ? `<button class="algo-ctrl-btn btn-primary" onclick="algoControl('${t.algo_id}','pause')">暂停</button>` : ''}
+          ${canResume ? `<button class="algo-ctrl-btn btn-primary" onclick="algoControl('${t.algo_id}','resume')">继续</button>` : ''}
+          ${active    ? `<button class="algo-ctrl-btn btn-danger"  onclick="algoControl('${t.algo_id}','cancel')">取消</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {}
+}
+
+async function algoControl(algoId, action) {
+  try {
+    const r = await fetch(`${BASE}/api/algo/${algoId}/control`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action }),
+    });
+    const d = await r.json();
+    if (!d.success && d.message) alert(d.message);
+    loadAlgos();
+  } catch(e) {}
+}
+
+function algoStatusLabel(s) {
+  const m = { pending:'待启动', running:'执行中', paused:'已暂停',
+              completed:'已完成', cancelled:'已取消', failed:'失败' };
+  return m[s] || s;
+}
+
+// ── 成交模式（账号级） ────────────────────────────────────────
+
+function applyFillModeUI(mode) {
+  const btnAuto   = document.getElementById('btn-mode-auto');
+  const btnManual = document.getElementById('btn-mode-manual');
+  btnAuto.classList.toggle('active', mode === 'auto');
+  btnManual.classList.toggle('active', mode === 'manual');
+  btnManual.classList.toggle('manual', mode === 'manual');
+  btnAuto.classList.remove('manual');
+}
+
+async function setAccountFillMode(mode) {
+  if (!selectedAccountId) return;
+  applyFillModeUI(mode);
+  await saveAccountConfig();
+  if (mode === 'manual') refreshPendingBadge();
+}
+
+// ── 待成交（手动模式） ────────────────────────────────────────
+
+async function refreshPendingBadge() {
+  try {
+    const r = await fetch(`${BASE}/api/pending-fills`);
+    const data = await r.json();
+    const badge = document.getElementById('pending-badge');
+    const count = data.length;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? '' : 'none';
+  } catch(e) {}
+}
+
+async function loadPendingFills() {
+  const tbody = document.getElementById('pending-tbody');
+  try {
+    const r = await fetch(`${BASE}/api/pending-fills`);
+    const data = await r.json();
+    const badge = document.getElementById('pending-badge');
+    badge.textContent = data.length;
+    badge.style.display = data.length > 0 ? '' : 'none';
+    if (!data.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty-hint">暂无待处理委托</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.map(o => {
+      const shortId = '…' + o.id.slice(-8);
+      const dir = o.direction === 'buy' ? '买入' : '卖出';
+      const dirCls = o.direction === 'buy' ? 'buy' : 'sell';
+      const price = o.price_type === 'market' ? '市价' : fmtPrice(o.price);
+      return `<tr>
+        <td style="color:var(--text-dim);font-size:10px" title="${o.id}">${shortId}</td>
+        <td style="color:var(--accent)">${o.symbol}</td>
+        <td class="${dirCls}">${dir}</td>
+        <td>${price}</td>
+        <td>${o.quantity}</td>
+        <td>
+          <button class="fill-action-btn fill-action-fill" onclick="pendingFill('${o.id}', ${o.quantity}, ${o.price || 0})">全量成交</button>
+          <button class="fill-action-btn fill-action-fill" onclick="openFillCustom('${o.id}', ${o.quantity}, ${o.price || 0})">自定义</button>
+          <button class="fill-action-btn fill-action-reject" onclick="pendingDecide('${o.id}','reject')">拒绝</button>
+          <button class="fill-action-btn fill-action-cancel" onclick="pendingDecide('${o.id}','cancel')">撤单</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty-hint">加载失败</td></tr>';
+  }
+}
+
+async function pendingFill(orderId, qty, price) {
+  await pendingDecide(orderId, 'fill', qty, price);
+}
+
+async function pendingDecide(orderId, action, fillQty = null, fillPrice = null, reason = null) {
+  try {
+    const body = { action };
+    if (fillQty !== null) body.fill_qty = fillQty;
+    if (fillPrice !== null) body.fill_price = fillPrice;
+    if (reason !== null) body.reason = reason;
+    const r = await fetch(`${BASE}/api/pending-fills/${encodeURIComponent(orderId)}/decide`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) { const e = await r.json(); alert(e.detail || '操作失败'); }
+    loadPendingFills();
+    // 同时刷新委托列表（如果在那个 tab 上）
+    if (activeTab === 'orders' && selectedAccountId) loadOrders(true);
+  } catch(e) { alert('操作失败'); }
+}
+
+function openFillCustom(orderId, maxQty, defaultPrice) {
+  _fillCustomOrderId = orderId;
+  _fillCustomMaxQty = maxQty;
+  document.getElementById('fillCustomTitle').textContent = `自定义成交 — ${orderId.slice(-8)}`;
+  document.getElementById('fillCustomInfo').textContent = `委托数量：${maxQty} 手，委托价：${fmtPrice(defaultPrice)}`;
+  document.getElementById('fillCustomQty').value = maxQty;
+  document.getElementById('fillCustomQty').max = maxQty;
+  document.getElementById('fillCustomPrice').value = defaultPrice > 0 ? defaultPrice.toFixed(2) : '';
+  document.getElementById('fillCustomError').textContent = '';
+  document.getElementById('fillCustomModal').classList.add('show');
+}
+
+function hideFillCustomModal() {
+  document.getElementById('fillCustomModal').classList.remove('show');
+  _fillCustomOrderId = null;
+}
+
+async function confirmFillCustom() {
+  const qty = parseInt(document.getElementById('fillCustomQty').value);
+  const price = parseFloat(document.getElementById('fillCustomPrice').value);
+  if (!qty || qty < 1) { document.getElementById('fillCustomError').textContent = '请输入有效数量（≥1）'; return; }
+  if (qty > _fillCustomMaxQty) { document.getElementById('fillCustomError').textContent = `不能超过委托量 ${_fillCustomMaxQty}`; return; }
+  if (!price || price <= 0) { document.getElementById('fillCustomError').textContent = '请输入有效价格（> 0）'; return; }
+  const orderId = _fillCustomOrderId;  // 先保存，hideFillCustomModal 会清空它
+  hideFillCustomModal();
+  await pendingDecide(orderId, 'fill', qty, price);
+}
+
+// ── 快速下单（场景控制区） ────────────────────────────────────
+
+let _tradeDir = 'buy';
+let _tradePriceType = 'limit';
+
+function setTradeDir(dir) {
+  _tradeDir = dir;
+  document.getElementById('btn-dir-buy').classList.toggle('active', dir === 'buy');
+  document.getElementById('btn-dir-sell').classList.toggle('active', dir === 'sell');
+}
+
+function setTradePriceType(pt) {
+  _tradePriceType = pt;
+  document.getElementById('btn-pt-limit').classList.toggle('active', pt === 'limit');
+  document.getElementById('btn-pt-market').classList.toggle('active', pt === 'market');
+  document.getElementById('trade_price').disabled = pt === 'market';
+}
+
+async function submitQuickTrade() {
+  const errEl = document.getElementById('tradeQuickError');
+  errEl.textContent = '';
+  if (!selectedAccountId) { errEl.textContent = '请先选择账号'; return; }
+  const symbol = document.getElementById('trade_symbol').value.trim().toUpperCase();
+  if (!symbol) { errEl.textContent = '请输入股票代码'; return; }
+  const qty = parseInt(document.getElementById('trade_qty').value);
+  if (!qty || qty < 1) { errEl.textContent = '请输入有效数量（≥1）'; return; }
+  const price = _tradePriceType === 'market' ? 0 : parseFloat(document.getElementById('trade_price').value);
+  if (_tradePriceType === 'limit' && (!price || price <= 0)) { errEl.textContent = '请输入有效价格（> 0）'; return; }
+  try {
+    const r = await fetch(`${BASE}/api/orders/submit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, direction: _tradeDir, price_type: _tradePriceType, price, quantity: qty, fund_account_id: selectedAccountId }),
+    });
+    const resp = await r.json().catch(() => ({}));
+    if (!r.ok) { errEl.textContent = resp.detail || `下单失败 (${r.status})`; return; }
+    errEl.style.color = 'var(--green)';
+    errEl.textContent = `委托成功，订单ID: …${(resp.order_id || resp.id || '').slice(-8)}`;
+    setTimeout(() => { errEl.textContent = ''; errEl.style.color = 'var(--red)'; }, 3000);
+    document.getElementById('trade_symbol').value = '';
+    document.getElementById('trade_qty').value = '';
+    document.getElementById('trade_price').value = '';
+    if (activeTab === 'orders' && selectedAccountId) loadOrders(true);
+  } catch(e) { errEl.textContent = '下单失败：' + e.message; }
+}
+
+async function submitTestBuy() {
+  const errEl = document.getElementById('tradeQuickError');
+  errEl.style.color = 'var(--red)';
+  errEl.textContent = '';
+  if (!selectedAccountId) { errEl.textContent = '请先选择账号'; return; }
+  const price = (7 + Math.random()).toFixed(2);          // 7.00 ~ 7.99
+  const qty   = Math.floor(Math.random() * 2501) + 500;  // 500 ~ 3000
+  try {
+    const r = await fetch(`${BASE}/api/orders/submit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol: '601222.SH', direction: 'buy', price_type: 'limit',
+                             price: parseFloat(price), quantity: qty, fund_account_id: selectedAccountId }),
+    });
+    const resp = await r.json().catch(() => ({}));
+    if (!r.ok) { errEl.textContent = resp.detail || `测试下单失败 (${r.status})`; return; }
+    errEl.style.color = 'var(--green)';
+    errEl.textContent = `测试买入 601222.SH ${qty}股 @${price}，ID: …${(resp.order_id || resp.id || '').slice(-8)}`;
+    setTimeout(() => { errEl.textContent = ''; errEl.style.color = 'var(--red)'; }, 4000);
+    if (activeTab === 'orders' && selectedAccountId) loadOrders(true);
+  } catch(e) { errEl.textContent = '测试下单失败：' + e.message; }
+}
+
+// ── 下单模态框 ────────────────────────────────────────────────
+
+let _modalDir = 'buy';
+let _modalPriceType = 'limit';
+
+function setModalDir(dir) {
+  _modalDir = dir;
+  document.getElementById('modal-btn-buy').classList.toggle('active', dir === 'buy');
+  document.getElementById('modal-btn-sell').classList.toggle('active', dir === 'sell');
+}
+
+function setModalPriceType(pt) {
+  _modalPriceType = pt;
+  document.getElementById('modal-btn-limit').classList.toggle('active', pt === 'limit');
+  document.getElementById('modal-btn-market').classList.toggle('active', pt === 'market');
+  document.getElementById('modal_price').disabled = pt === 'market';
+}
+
+function openTradeModal(symbol, direction, qty, price) {
+  _modalDir = direction || 'buy';
+  _modalPriceType = 'limit';
+  document.getElementById('modal-btn-buy').classList.toggle('active', _modalDir === 'buy');
+  document.getElementById('modal-btn-sell').classList.toggle('active', _modalDir === 'sell');
+  document.getElementById('modal-btn-limit').classList.add('active');
+  document.getElementById('modal-btn-market').classList.remove('active');
+  document.getElementById('modal_price').disabled = false;
+  document.getElementById('tradeModalTitle').textContent = direction === 'sell' ? `平仓 — ${symbol}` : `加仓 — ${symbol}`;
+  document.getElementById('modal_symbol').value = symbol || '';
+  document.getElementById('modal_qty').value = qty > 0 ? qty : '';
+  document.getElementById('modal_price').value = price > 0 ? price.toFixed(2) : '';
+  document.getElementById('tradeModalError').textContent = '';
+  document.getElementById('tradeModal').classList.add('show');
+}
+
+function hideTradeModal() {
+  document.getElementById('tradeModal').classList.remove('show');
+}
+
+async function submitTradeModal() {
+  const errEl = document.getElementById('tradeModalError');
+  errEl.textContent = '';
+  if (!selectedAccountId) { errEl.textContent = '请先选择账号'; return; }
+  const symbol = document.getElementById('modal_symbol').value.trim().toUpperCase();
+  if (!symbol) { errEl.textContent = '请输入股票代码'; return; }
+  const qty = parseInt(document.getElementById('modal_qty').value);
+  if (!qty || qty < 1) { errEl.textContent = '请输入有效数量（≥1）'; return; }
+  const price = _modalPriceType === 'market' ? 0 : parseFloat(document.getElementById('modal_price').value);
+  if (_modalPriceType === 'limit' && (!price || price <= 0)) { errEl.textContent = '请输入有效价格（> 0）'; return; }
+  try {
+    const r = await fetch(`${BASE}/api/orders/submit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbol, direction: _modalDir, price_type: _modalPriceType, price, quantity: qty, fund_account_id: selectedAccountId }),
+    });
+    const resp = await r.json().catch(() => ({}));
+    if (!r.ok) { errEl.textContent = resp.detail || `下单失败 (${r.status})`; return; }
+    hideTradeModal();
+    if (activeTab === 'orders' && selectedAccountId) loadOrders(true);
+    if (activeTab === 'positions') loadPositions();
+  } catch(e) { errEl.textContent = '下单失败：' + e.message; }
+}
+
+// ── 工具函数 ─────────────────────────────────────────────────
+
+function fmtNum(n) { return Number(n || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtPrice(p) { return p ? Number(p).toFixed(2) : '0.00'; }
+function fmtTime(ts) { return ts ? String(ts).slice(0, 19).replace('T', ' ') : ''; }
+function statusLabel(s) {
+  const m = { submitted:'已报', partial_filled:'部分成交', filled:'已成交', rejected:'已拒绝', canceled:'已撤单', pending:'待报' };
+  return m[s] || s;
+}
+
+init();
+</script>
+</body>
+</html>
